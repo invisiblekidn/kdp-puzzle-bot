@@ -262,6 +262,8 @@ def main():
     app.add_error_handler(on_error)
     print("\nБот запущен. Откройте его в Telegram и напишите /new\nНе закрывайте это окно, пока пользуетесь ботом.\n")
     log.info("bot started, admins: %s", admin_ids() or "none yet")
+    # Python 3.14 no longer creates an event loop on demand, so give run_polling one to use
+    asyncio.set_event_loop(asyncio.new_event_loop())
     app.run_polling(drop_pending_updates=True)
 
 
