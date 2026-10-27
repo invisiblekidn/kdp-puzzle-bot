@@ -1,8 +1,8 @@
 # KDP Puzzle Bot
 
 Генератор детских книг-головоломок (6–8 лет) для Amazon KDP Paperback, бренд Invisible KID.
-Сейчас готово ядро: генератор книги. Telegram-бот (@kid_01_bot) будет следующим шагом и будет
-вызывать этот же код.
+Telegram-бот (@kid_01_bot) работает на вашем компьютере: спрашивает настройки кнопками и присылает
+готовый `interior.pdf`. Установка и запуск: [INSTALL.md](INSTALL.md) (двойной клик по `start.bat`).
 
 ## Что умеет
 
@@ -30,6 +30,8 @@ python make_book.py --theme christmas --maze 10 --wordsearch 10 --hidden 6 --dot
 
 ## Структура
 
+- `bot.py`: Telegram-бот (диалог, сборка в фоне, отправка превью и PDF). Настройки в `.env`.
+- `start.bat`: запуск на Windows; при первом запуске сам ставит зависимости.
 - `puzzlebook/lib.py`: холст и запись PDF (только Pillow).
 - `puzzlebook/icons.py`: контурные иконки, которые ребёнок может раскрасить.
 - `puzzlebook/puzzles/`: по файлу на каждый тип головоломки (страница + ответ).
