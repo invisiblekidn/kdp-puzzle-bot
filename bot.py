@@ -9,10 +9,13 @@ import random
 import time
 from logging.handlers import RotatingFileHandler
 
+import httpx
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton as Btn, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.constants import ParseMode
+from telegram.error import NetworkError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.request import HTTPXRequest
 
 from puzzlebook.book import ORDER, Book, BookSpec
 
@@ -248,12 +251,34 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
+class PatientRequest(HTTPXRequest):
+    """Waits longer for Telegram and retries when the connection itself could not be opened.
+
+    On some networks the first connection to api.telegram.org takes several seconds. Retrying is safe
+    only for connect errors: then the request never reached Telegram, so nothing gets sent twice.
+    """
+
+    async def do_request(self, *args, **kwargs):
+        for attempt in range(4):
+            try:
+                return await super().do_request(*args, **kwargs)
+            except NetworkError as e:
+                if attempt == 3 or not isinstance(e.__cause__, (httpx.ConnectTimeout, httpx.ConnectError)):
+                    raise
+                log.warning("no connection to Telegram, retry %d: %r", attempt + 1, e.__cause__)
+                await asyncio.sleep(2 * (attempt + 1))
+
+
 def main():
     token = os.getenv("BOT_TOKEN", "").strip()
     if not token or token.startswith("вставьте"):
         print("\nНе найден токен бота. Откройте файл .env в Блокноте и вставьте токен от @BotFather после BOT_TOKEN=\n")
         return
-    app = Application.builder().token(token).build()
+    timeouts = dict(connect_timeout=20, read_timeout=30, write_timeout=60, media_write_timeout=180, pool_timeout=20)
+    app = (Application.builder().token(token)
+           .request(PatientRequest(connection_pool_size=8, **timeouts))
+           .get_updates_request(PatientRequest(**timeouts))
+           .build())
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("new", cmd_new))
