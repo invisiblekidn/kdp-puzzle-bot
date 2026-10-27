@@ -8,6 +8,8 @@ THEMES = {
     "christmas": {
         "name": "Christmas",
         "icons": ["tree", "star", "gift", "snowman", "heart", "moon", "house", "balloon", "ball", "cloud"],
+        "maze_shapes": ["tree", "star", "snowman", "gift", "heart", "circle"],
+        "dots": ["tree", "snowman", "gingerbread", "bell", "star", "owl", "bunny"],
         "pairs": [("snowman", "house", "Help the snowman get home!"), ("star", "tree", "Put the star on the tree!"),
                   ("gift", "house", "Take the gift to the house!"), ("snowman", "gift", "Help the snowman find the gift!")],
         "words": ["SANTA", "ELF", "GIFT", "TREE", "STAR", "SNOW", "BELL", "SLED", "TOYS", "CANDY", "REINDEER",
@@ -17,6 +19,8 @@ THEMES = {
     "halloween": {
         "name": "Halloween",
         "icons": ["pumpkin", "ghost", "moon", "star", "house", "tree", "cloud", "apple", "balloon", "heart"],
+        "maze_shapes": ["pumpkin", "ghost", "moon", "circle", "star"],
+        "dots": ["pumpkin", "ghost", "bat", "cat", "owl", "star"],
         "pairs": [("ghost", "house", "Help the ghost find the spooky house!"),
                   ("pumpkin", "moon", "Roll the pumpkin to the moon!"),
                   ("ghost", "pumpkin", "Help the ghost find the pumpkin!")],
@@ -27,6 +31,8 @@ THEMES = {
     "space": {
         "name": "Space",
         "icons": ["rocket", "planet", "star", "moon", "sun", "cloud", "flag", "ball", "balloon", "heart"],
+        "maze_shapes": ["rocket", "star", "moon", "circle", "diamond"],
+        "dots": ["rocket", "ufo", "star", "bird", "fish"],
         "pairs": [("rocket", "moon", "Fly the rocket to the moon!"), ("rocket", "planet", "Find the way to the planet!"),
                   ("rocket", "star", "Zoom to the bright star!")],
         "words": ["ROCKET", "PLANET", "STAR", "MOON", "SUN", "COMET", "ORBIT", "ALIEN", "MARS", "EARTH", "SPACE",
@@ -36,6 +42,8 @@ THEMES = {
     "animals": {
         "name": "Animal",
         "icons": ["bunny", "mouse", "bee", "fish", "carrot", "cheese", "flower", "apple", "tree", "sun", "star"],
+        "maze_shapes": ["fish", "apple", "heart", "cloud", "star", "circle"],
+        "dots": ["fish", "cat", "bunny", "owl", "butterfly", "turtle", "whale", "snail", "bird"],
         "pairs": [("bunny", "carrot"), ("mouse", "cheese"), ("bee", "flower"), ("fish", "boat", "Help the fish swim to the boat!")],
         "words": ["CAT", "DOG", "LION", "TIGER", "BEAR", "ZEBRA", "HORSE", "MOUSE", "BUNNY", "FROG", "DUCK", "OWL",
                   "FOX", "PANDA", "KOALA", "MONKEY", "GIRAFFE", "TURTLE", "RABBIT", "PENGUIN", "SHEEP", "COW",

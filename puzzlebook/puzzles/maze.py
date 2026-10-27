@@ -1,84 +1,246 @@
-"""Rectangular mazes (recursive backtracker) with a guaranteed single solution."""
+"""Mazes on square, honeycomb and round grids, cut into fun shapes, with straight, wavy or outlined walls.
+
+Every maze is a spanning tree of its cells (recursive backtracker), so there is exactly one way through.
+Geometry is built in abstract units first, then optionally warped and fitted onto the page.
+"""
+import math
+
 from ..icons import draw_icon
 from ..layout import BOTTOM, footer_level, frame, header
 from ..lib import BOLD
+from ..shapes import SHAPES
+
+SQ3 = math.sqrt(3)
+THIN_SHAPES = {"star", "tree", "moon", "rocket", "gift", "ghost"}
 
 
-def make_maze(cols, rows, cs, ce, rnd):
-    hw = [[True] * cols for _ in range(rows + 1)]       # hw[r][c]: wall above cell (r, c)
-    vw = [[True] * (cols + 1) for _ in range(rows)]     # vw[r][c]: wall left of cell (r, c)
-    seen = [[False] * cols for _ in range(rows)]
-    r, c = 0, cs
-    seen[r][c] = True
-    stack = [(r, c)]
+# ------------------------------------------------------------------ grids
+def square_cells(n):
+    s = 2 / n
+    return [[(-1 + c * s, 1 - r * s), (-1 + (c + 1) * s, 1 - r * s), (-1 + (c + 1) * s, 1 - (r + 1) * s),
+             (-1 + c * s, 1 - (r + 1) * s)] for r in range(n) for c in range(n)], s
+
+
+def hex_cells(n):
+    w = 2 / n                       # pointy-top hexagons, n across
+    R = w / SQ3
+    out = []
+    for r in range(math.ceil(2 / (1.5 * R)) + 1):
+        for c in range(-1, n + 1):
+            cx, cy = -1 + c * w + (r % 2) * w / 2, 1 - r * 1.5 * R
+            out.append([(cx + R * math.cos(math.radians(90 + 60 * k)), cy + R * math.sin(math.radians(90 + 60 * k)))
+                        for k in range(6)])
+    return out, w
+
+
+def masked_graph(polys, inside):
+    """Cells whose centre lies in the shape -> centres + walls [(a, b or None, polyline)]."""
+    centres = [(sum(p[0] for p in P) / len(P), sum(p[1] for p in P) / len(P)) for P in polys]
+    keep = [i for i, c in enumerate(centres) if abs(c[0]) <= 1 and abs(c[1]) <= 1 and inside(*c)]
+    edges = {}
+    for i in keep:
+        P = polys[i]
+        for a, b in zip(P, P[1:] + P[:1]):
+            key = tuple(sorted(((round(a[0], 5), round(a[1], 5)), (round(b[0], 5), round(b[1], 5)))))
+            edges.setdefault(key, []).append((i, [a, b]))
+    # largest connected piece only
+    adj = {i: [] for i in keep}
+    for owners in edges.values():
+        if len(owners) == 2:
+            adj[owners[0][0]].append(owners[1][0])
+            adj[owners[1][0]].append(owners[0][0])
+    best = set()
+    seen = set()
+    for i in keep:
+        if i in seen:
+            continue
+        comp, queue = {i}, [i]
+        for j in queue:
+            for k in adj[j]:
+                if k not in comp:
+                    comp.add(k)
+                    queue.append(k)
+        seen |= comp
+        if len(comp) > len(best):
+            best = comp
+    index = {old: new for new, old in enumerate(sorted(best))}
+    walls = []
+    for owners in edges.values():
+        mine = [(i, line) for i, line in owners if i in best]
+        if len(mine) == 2:
+            walls.append((index[mine[0][0]], index[mine[1][0]], mine[0][1]))
+        elif len(mine) == 1:
+            walls.append((index[mine[0][0]], None, mine[0][1]))
+    return [centres[i] for i in sorted(best)], walls
+
+
+def arc(r, a0, a1, step=0.12):
+    n = max(2, math.ceil(abs(a1 - a0) * r / step))
+    return [(r * math.cos(a0 + (a1 - a0) * t / n), r * math.sin(a0 + (a1 - a0) * t / n)) for t in range(n + 1)]
+
+
+def polar_graph(rings):
+    """Round maze: one centre cell, then rings whose cell count doubles when cells get too wide."""
+    counts = [1, 6]
+    for i in range(2, rings + 1):
+        counts.append(counts[-1] * 2 if 2 * math.pi * i / counts[-1] > 2.0 else counts[-1])
+    ids, centres = {}, []
+    for i, n in enumerate(counts):
+        for j in range(n):
+            ids[i, j] = len(centres)
+            if i == 0:
+                centres.append((0.0, 0.0))
+            else:
+                a = 2 * math.pi * (j + 0.5) / n
+                centres.append(((i + 0.5) * math.cos(a), (i + 0.5) * math.sin(a)))
+    walls = []
+    for i in range(1, rings + 1):
+        n = counts[i]
+        k = n // counts[i - 1]
+        for j in range(n):
+            a0, a1 = 2 * math.pi * j / n, 2 * math.pi * (j + 1) / n
+            walls.append((ids[i, j], ids[i - 1, j // k], arc(i, a0, a1)))
+            if n > 1:
+                walls.append((ids[i, j], ids[i, (j + 1) % n], [(i * math.cos(a1), i * math.sin(a1)),
+                                                                ((i + 1) * math.cos(a1), (i + 1) * math.sin(a1))]))
+            if i == rings:
+                walls.append((ids[i, j], None, arc(i + 1, a0, a1)))
+    return centres, walls
+
+
+# ------------------------------------------------------------ generation
+def carve(n_cells, walls, rnd):
+    """Recursive backtracker over the cell graph. Returns the set of opened wall indices and the tree."""
+    adj = [[] for _ in range(n_cells)]
+    for w, (a, b, _) in enumerate(walls):
+        if b is not None:
+            adj[a].append((b, w))
+            adj[b].append((a, w))
+    start = rnd.randrange(n_cells)
+    seen, stack, opened = {start}, [start], set()
+    tree = [[] for _ in range(n_cells)]
     while stack:
-        r, c = stack[-1]
-        opts = []
-        if r > 0 and not seen[r - 1][c]:
-            opts.append((r - 1, c))
-        if r < rows - 1 and not seen[r + 1][c]:
-            opts.append((r + 1, c))
-        if c > 0 and not seen[r][c - 1]:
-            opts.append((r, c - 1))
-        if c < cols - 1 and not seen[r][c + 1]:
-            opts.append((r, c + 1))
+        cur = stack[-1]
+        opts = [(nb, w) for nb, w in adj[cur] if nb not in seen]
         if not opts:
             stack.pop()
             continue
-        nr, nc = rnd.choice(opts)
-        if nr < r:
-            hw[r][c] = False
-        elif nr > r:
-            hw[nr][c] = False
-        elif nc < c:
-            vw[r][c] = False
-        else:
-            vw[r][nc] = False
-        seen[nr][nc] = True
-        stack.append((nr, nc))
-    hw[0][cs] = False                                   # entrance (top)
-    hw[rows][ce] = False                                # exit (bottom)
-    # solution by BFS
-    prev = {(0, cs): None}
-    queue = [(0, cs)]
-    for r, c in queue:
-        steps = []
-        if r > 0 and not hw[r][c]:
-            steps.append((r - 1, c))
-        if r < rows - 1 and not hw[r + 1][c]:
-            steps.append((r + 1, c))
-        if c > 0 and not vw[r][c]:
-            steps.append((r, c - 1))
-        if c < cols - 1 and not vw[r][c + 1]:
-            steps.append((r, c + 1))
-        for nxt in steps:
-            if nxt not in prev:
-                prev[nxt] = (r, c)
-                queue.append(nxt)
-    path, cur = [], (rows - 1, ce)
-    while cur is not None:
-        path.append(cur)
-        cur = prev[cur]
-    return dict(cols=cols, rows=rows, hw=hw, vw=vw, cs=cs, ce=ce, sol=path[::-1])
+        nb, w = rnd.choice(opts)
+        opened.add(w)
+        tree[cur].append((nb, w))
+        tree[nb].append((cur, w))
+        seen.add(nb)
+        stack.append(nb)
+    return opened, tree
 
 
-def draw_maze(C, m, mx0, mytop, cell, lw, solution=False, sol_lw=3.0):
-    rows, cols = m["rows"], m["cols"]
-    half = lw / 2
-    for r in range(rows + 1):
-        for c in range(cols):
-            if m["hw"][r][c]:
-                y = mytop - r * cell
-                C.rect(mx0 + c * cell - half, y - half, mx0 + (c + 1) * cell + half, y + half)
-    for r in range(rows):
-        for c in range(cols + 1):
-            if m["vw"][r][c]:
-                x = mx0 + c * cell
-                C.rect(x - half, mytop - r * cell + half, x + half, mytop - (r + 1) * cell - half)
-    if solution:
-        pts = [(mx0 + (c + 0.5) * cell, mytop - (r + 0.5) * cell) for r, c in m["sol"]]
-        pts = [(pts[0][0], mytop + cell * 0.4)] + pts + [(pts[-1][0], mytop - rows * cell - cell * 0.4)]
-        C.stroke(pts, sol_lw, gray=110)
+def path_between(tree, a, b):
+    prev = {a: None}
+    queue = [a]
+    for cur in queue:
+        for nb, w in tree[cur]:
+            if nb not in prev:
+                prev[nb] = (cur, w)
+                queue.append(nb)
+    out, cur = [], b
+    while prev[cur] is not None:
+        p, w = prev[cur]
+        out.append((cur, w))
+        cur = p
+    out.append((a, None))
+    return out[::-1]
+
+
+def mid(line):
+    return line[len(line) // 2] if len(line) > 2 else ((line[0][0] + line[-1][0]) / 2, (line[0][1] + line[-1][1]) / 2)
+
+
+def densify(pts, step):
+    out = [pts[0]]
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        n = max(1, math.ceil(math.hypot(x1 - x0, y1 - y0) / step))
+        out += [(x0 + (x1 - x0) * t / n, y0 + (y1 - y0) * t / n) for t in range(1, n + 1)]
+    return out
+
+
+def chains(lines):
+    """Joins wall segments that meet end to end into longer polylines (so they can be smoothed)."""
+    key = lambda p: (round(p[0], 5), round(p[1], 5))
+    ends = {}
+    for i, line in enumerate(lines):
+        for p in (line[0], line[-1]):
+            ends.setdefault(key(p), []).append(i)
+    used, out = set(), []
+
+    def walk(i, from_end):
+        line = lines[i] if key(lines[i][0]) == from_end else lines[i][::-1]
+        used.add(i)
+        chain = list(line)
+        while True:
+            k = key(chain[-1])
+            nxt = [j for j in ends[k] if j not in used]
+            if len(ends[k]) != 2 or not nxt:
+                return chain
+            j = nxt[0]
+            seg = lines[j] if key(lines[j][0]) == k else lines[j][::-1]
+            used.add(j)
+            chain += seg[1:]
+
+    for k, ids in ends.items():
+        if len(ids) != 2:
+            for i in ids:
+                if i not in used:
+                    out.append(walk(i, k))
+    for i in range(len(lines)):
+        if i not in used:
+            out.append(walk(i, key(lines[i][0])))
+    return out
+
+
+def chaikin(pts, rounds=2):
+    closed = math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) < 1e-6
+    for _ in range(rounds):
+        if len(pts) < 3:
+            return pts
+        out = [] if closed else [pts[0]]
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            out += [(0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1), (0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1)]
+        pts = out + ([out[0]] if closed else [pts[-1]])
+    return pts
+
+
+class Warp:
+    """Smooth wobble applied to every point, so walls stay joined and the maze stays solvable."""
+
+    def __init__(self, rnd, cell, strength):
+        self.a = cell * strength
+        self.f = [2 * math.pi / (cell * rnd.uniform(3.5, 5.5)) for _ in range(4)]
+        self.p = [rnd.uniform(0, 2 * math.pi) for _ in range(4)]
+
+    def __call__(self, x, y):
+        f, p, a = self.f, self.p, self.a
+        return (x + a * (math.sin(f[0] * y + p[0]) + 0.5 * math.sin(f[1] * (x + y) + p[1])) / 1.5,
+                y + a * (math.sin(f[2] * x + p[2]) + 0.5 * math.sin(f[3] * (x - y) + p[3])) / 1.5)
+
+
+# ----------------------------------------------------------------- designs
+def plan_designs(rnd, theme, count):
+    """A varied sequence of (grid, shape, walls) so that no two mazes in a row look alike.
+
+    walls: "straight", "rounded" (soft bubbly corners), "wavy" (wobbly lines) or "outlined" (double walls).
+    """
+    shapes = list(theme.get("maze_shapes", ["heart", "star", "circle"]))
+    rnd.shuffle(shapes)
+    styles = {"square": ["straight", "rounded", "wavy", "outlined"], "hex": ["straight", "rounded", "outlined"],
+              "round": ["straight", "outlined"]}
+    out, used = [], {}
+    for i in range(count):
+        grid = ["square", "hex", "round", "square", "hex", "square"][i % 6]
+        shape = "circle" if grid == "round" else (shapes[i % len(shapes)] if i % 5 else "square")
+        k = used.get(grid, 0)
+        used[grid] = k + 1
+        out.append((grid, shape, styles[grid][(k + i) % len(styles[grid])]))
+    return out
 
 
 class Maze:
@@ -88,39 +250,114 @@ class Maze:
 
     def __init__(self, rnd, level, theme, number, ctx):
         self.level, self.number = level, number
-        cols = round(6 + 10 * level)                    # 6x8 for the youngest .. 16x20 at the end
-        rows = round(cols * 1.25)
-        cs = rnd.randrange(cols)
-        ce = rnd.randrange(cols)
-        if abs(cs - ce) < cols // 3:
-            ce = cols - 1 - cs
-        self.m = make_maze(cols, rows, cs, ce, rnd)
+        if "designs" not in ctx:
+            ctx["designs"] = plan_designs(rnd, theme, 64)
+        self.grid, self.shape, self.style = ctx["designs"][number - 1]
+        self.outlined = self.style == "outlined"
+        target = 40 + 260 * level ** 1.3                 # cells: about 40 for the youngest, 300 at the end
+        if self.shape not in ("square", "circle"):       # a shape needs enough cells to be recognisable
+            target = max(target, 170 if self.shape in THIN_SHAPES else 90)
+        if self.outlined:
+            target *= 0.6                                # outlined walls need wider paths
+        if self.grid == "round":
+            rings = max(3, round(math.sqrt(target / 3.2)))
+            centres, walls = polar_graph(rings)
+            cell = 1.0
+            self.finish_inside = True
+        else:
+            inside = SHAPES[self.shape]
+            fill = sum(inside(-1 + (i + 0.5) / 20, -1 + (j + 0.5) / 20) for i in range(40) for j in range(40)) / 1600
+            n = max(5, round(math.sqrt(target / max(fill, 0.2))))
+            if self.grid == "hex":
+                polys, cell = hex_cells(round(n * 0.93))
+            else:
+                polys, cell = square_cells(n)
+            centres, walls = masked_graph(polys, inside)
+            self.finish_inside = False
+        opened, tree = carve(len(centres), walls, rnd)
+        outer = [w for w, (a, b, _) in enumerate(walls) if b is None]
+        ys = [mid(walls[w][2])[1] for w in outer]
+        top = max(ys)
+        cand = [w for w, y in zip(outer, ys) if y >= top - cell * 0.6]
+        w_in = rnd.choice(cand)
+        start = walls[w_in][0]
+        if self.finish_inside:
+            finish, w_out = 0, None
+        else:
+            bot = min(ys)
+            cand = [w for w, y in zip(outer, ys) if y <= bot + cell * 0.6]
+            sx = mid(walls[w_in][2])[0]
+            w_out = max(cand, key=lambda w: abs(mid(walls[w][2])[0] - sx) + rnd.random() * cell)
+            finish = walls[w_out][0]
+        opened |= {w_in} | ({w_out} if w_out is not None else set())
+        warp = Warp(rnd, cell, 0.24) if self.style == "wavy" else (lambda x, y: (x, y))
+        step = cell * 0.12
+        lines = [line for w, (_, _, line) in enumerate(walls) if w not in opened]
+        if self.style == "rounded":
+            lines = [chaikin(c, 3) for c in chains(lines)]
+        self.walls = [[warp(*p) for p in densify(line, step)] for line in lines]
+        # solution: cell centres joined through the middles of the opened walls
+        route = path_between(tree, start, finish)
+        pts = [mid(walls[w_in][2])]
+        for cell_id, w in route:
+            if w is not None:
+                pts.append(mid(walls[w][2]))
+            pts.append(centres[cell_id])
+        if w_out is not None:
+            pts.append(mid(walls[w_out][2]))
+        self.solution = [warp(*p) for p in densify(pts, step)]
+        self.entry = warp(*mid(walls[w_in][2]))
+        self.exit = warp(*mid(walls[w_out][2])) if w_out is not None else warp(*centres[finish])
+        self.cell = cell
+        allp = [p for line in self.walls for p in line]
+        self.bbox = (min(p[0] for p in allp), min(p[1] for p in allp), max(p[0] for p in allp), max(p[1] for p in allp))
         pair = theme["pairs"][(number - 1) % len(theme["pairs"])]
         self.a, self.b = pair[:2]
         self.line = pair[2] if len(pair) > 2 else f"Help the {self.a} find the {self.b}!"
 
+    def _fit(self, x0, y0, x1, y1):
+        bx0, by0, bx1, by1 = self.bbox
+        k = min((x1 - x0) / (bx1 - bx0), (y1 - y0) / (by1 - by0))
+        ox = (x0 + x1) / 2 - (bx0 + bx1) / 2 * k
+        oy = (y0 + y1) / 2 - (by0 + by1) / 2 * k
+        return k, lambda p: (ox + p[0] * k, oy + p[1] * k)
+
+    def _draw(self, C, T, k, lw, answer=False):
+        cpt = self.cell * k
+        if self.outlined and not answer:
+            outer = max(lw * 3.2, cpt * 0.34)
+            for line in self.walls:
+                C.stroke([T(p) for p in line], outer)
+            for line in self.walls:
+                C.stroke([T(p) for p in line], outer - 2 * lw * 0.8, gray=255)
+        else:
+            for line in self.walls:
+                C.stroke([T(p) for p in line], lw)
+        if answer:
+            C.stroke([T(p) for p in self.solution], max(1.8, cpt * 0.16), gray=120)
+
     def page(self, C, n):
-        m = self.m
         x0, x1 = frame(n)
         top = header(C, n, f"Maze {self.number}", self.line)
-        area_top, area_bot = top - 50, BOTTOM + 52
-        cell = min((x1 - x0 - 10) / m["cols"], (area_top - area_bot) / m["rows"])
-        mx0 = (x0 + x1) / 2 - m["cols"] * cell / 2
-        mytop = area_top - ((area_top - area_bot) - m["rows"] * cell) / 2
-        draw_maze(C, m, mx0, mytop, cell, max(2.4, min(5.0, cell * 0.08)))
-        sx = mx0 + (m["cs"] + 0.5) * cell
-        ex = mx0 + (m["ce"] + 0.5) * cell
-        mybot = mytop - m["rows"] * cell
-        C.text(sx, mytop + 9, "START", BOLD, 11)
-        draw_icon(C, self.a, sx, mytop + 38, 34)
-        C.text(ex, mybot - 18, "FINISH", BOLD, 11)
-        draw_icon(C, self.b, ex, mybot - 41, 34)
+        area_top = top - 70
+        area_bot = BOTTOM + (14 if self.finish_inside else 70)
+        k, T = self._fit(x0 + 6, area_bot, x1 - 6, area_top)
+        lw = max(2.0, min(4.6, self.cell * k * 0.09))
+        self._draw(C, T, k, lw)
+        # labels sit just outside the maze's own top / bottom edge (the opening is within ~half a cell of it)
+        top_y = T((0, self.bbox[3]))[1]
+        bot_y = T((0, self.bbox[1]))[1]
+        ex, _ = T(self.entry)
+        C.text(ex, top_y + 11, "START", BOLD, 11)
+        draw_icon(C, self.a, ex, top_y + 44, 42)
+        fx, fy = T(self.exit)
+        if self.finish_inside:
+            draw_icon(C, self.b, fx, fy, min(40, self.cell * k * 0.9))
+        else:
+            C.text(fx, bot_y - 20, "FINISH", BOLD, 11)
+            draw_icon(C, self.b, fx, bot_y - 48, 42)
         footer_level(C, n, self.level)
 
     def answer(self, C, x0, y0, x1, y1):
-        m = self.m
-        cell = min((x1 - x0) / m["cols"], (y1 - y0) / (m["rows"] + 0.9))
-        mx0 = (x0 + x1) / 2 - m["cols"] * cell / 2
-        mytop = y1 - 0.45 * cell
-        draw_maze(C, m, mx0, mytop, cell, max(1.2, min(2.4, cell * 0.08)), solution=True,
-                  sol_lw=max(2.0, cell * 0.14))
+        k, T = self._fit(x0, y0, x1, y1)
+        self._draw(C, T, k, max(1.0, min(2.2, self.cell * k * 0.08)), answer=True)

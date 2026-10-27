@@ -1,78 +1,151 @@
-"""Dot-to-dot pictures: numbered points that reveal a shape when joined in order."""
+"""Dot-to-dot pictures: the child joins 25-75 numbered dots; eyes, mouths and spots are already printed."""
 import math
 
+from ..figures import FIGURES
 from ..layout import BOTTOM, footer_level, frame, header
-from ..lib import BOLD, REG, ellipse_pts, fit_to_box, heart_pts, resample, star_pts
+from ..lib import BOLD, REG, S, font
+
+DOT_R = 2.3                 # dot radius (pt)
+NUM_PT = 9.5                # number size (pt)
 
 
-def smooth_shapes():
-    heart = resample(heart_pts(8, 400), 12, closed=True)
-    flower = [((1 + 0.4 * math.cos(6 * t)) * math.cos(t), (1 + 0.4 * math.cos(6 * t)) * math.sin(t))
-              for t in [2 * math.pi * k / 24 for k in range(24)]]
-    # crescent moon: outer arc + inner arc
-    R = 5.0
-    outer = ellipse_pts(0, 0, R, R, 0, 75, 285, 7)
-    px, py = outer[0]
-    cx2 = 2.6
-    rho = math.hypot(px - cx2, py)
-    b0 = math.degrees(math.atan2(py, px - cx2))
-    inner = ellipse_pts(cx2, 0, rho, rho, 0, 360 - b0, b0, 7)[1:-1]
-    moon = outer + inner
-    # ice cream: cone + round scoop
-    scoop = ellipse_pts(4, 7.3, 3.6, 3.6, 0, 190, -10, 7)
-    ice = [(4, 0), (2.8, 2.3), (2.1, 4.5), (0.5, 5.3)] + scoop + [(7.5, 5.3), (5.9, 4.5), (5.2, 2.3)]
-    sun = star_pts(5, 3.1, 8)
-    return heart, flower, moon, ice, sun
-
-
-def dot_shapes():
-    heart, flower, moon, ice, sun = smooth_shapes()
-    shapes = [
-        ("crown", [(0, 0), (0, 6), (2, 3.4), (4, 7), (6, 3.4), (8, 6), (8, 0)]),
-        ("fish", [(0, 4), (1.8, 6), (4.5, 6.8), (7.2, 5.6), (9, 7.5), (9, 0.5), (7.2, 2.4), (4.5, 1.2), (1.8, 2)]),
-        ("house", [(0, 0), (0, 5), (4, 9), (6, 7), (6, 9), (7.4, 9), (7.4, 5.6), (8, 5), (8, 0)]),
-        ("star", star_pts(5, 2, 5)),
-        ("rocket", [(4, 11), (5.4, 8.6), (5.4, 3.4), (7.4, 1.6), (7.4, 0), (5.2, 1.1), (2.8, 1.1), (0.6, 0),
-                    (0.6, 1.6), (2.6, 3.4), (2.6, 8.6)]),
-        ("cat", [(0.8, 9.6), (3.0, 7.7), (5.0, 7.7), (7.2, 9.6), (7.7, 6.3), (8, 4), (7, 1.8), (5.2, 0.5),
-                 (2.8, 0.5), (1, 1.8), (0, 4), (0.3, 6.3)]),
-        ("heart", heart),
-        ("ice cream", ice),
-        ("moon", moon),
-        ("tree", [(3.2, 0), (3.2, 2), (0, 2), (2.2, 4.6), (0.8, 4.6), (3, 7.4), (1.8, 7.4), (4, 10), (6.2, 7.4),
-                  (5, 7.4), (7.2, 4.6), (5.8, 4.6), (8, 2), (4.8, 2), (4.8, 0)]),
-        ("sun", sun),
-        ("flower", flower),
-    ]
-    return sorted(shapes, key=lambda s: len(s[1]))
-
-
-def label_dirs(pts):
-    """Unit vector pointing away from the polygon at every vertex (for number labels)."""
-    n = len(pts)
-    area = sum(pts[i][0] * pts[(i + 1) % n][1] - pts[(i + 1) % n][0] * pts[i][1] for i in range(n))
-    sign = 1 if area > 0 else -1
+def hermite(p0, p1, m0, m1, n):
     out = []
-    for i in range(n):
-        p, a, b = pts[i], pts[i - 1], pts[(i + 1) % n]
-        e1 = (p[0] - a[0], p[1] - a[1])
-        e2 = (b[0] - p[0], b[1] - p[1])
-        l1, l2 = math.hypot(*e1) or 1, math.hypot(*e2) or 1
-        s = (-e1[0] / l1 + e2[0] / l2, -e1[1] / l1 + e2[1] / l2)
-        ls = math.hypot(*s)
-        cross = e1[0] * e2[1] - e1[1] * e2[0]
-        if ls < 0.08:
-            d = (sign * (e1[1] / l1 + e2[1] / l2), -sign * (e1[0] / l1 + e2[0] / l2))
-        else:
-            convex = cross * sign > 0
-            d = (-s[0], -s[1]) if convex else s
-        ld = math.hypot(*d) or 1
-        out.append((d[0] / ld, d[1] / ld))
+    for k in range(n):
+        t = k / n
+        h00, h10, h01, h11 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+        out.append((h00 * p0[0] + h10 * m0[0] + h01 * p1[0] + h11 * m1[0],
+                    h00 * p0[1] + h10 * m0[1] + h01 * p1[1] + h11 * m1[1]))
     return out
 
 
-SHAPES = dot_shapes()
-MAX_COUNT = len(SHAPES)
+def spline(pts, closed=True, n=24):
+    """Catmull-Rom curve through the points; (x, y, 1) points are sharp corners.
+    Returns the dense curve and the index in it of every control point."""
+    P = [(p[0], p[1]) for p in pts]
+    corner = [len(p) > 2 for p in pts]
+    m = len(P)
+    if not closed:
+        corner[0] = corner[-1] = True
+
+    def tangent(i, j):                 # tangent at control point i on segment i -> j
+        if corner[i]:
+            return (P[j][0] - P[i][0], P[j][1] - P[i][1]) if j != i else (0, 0)
+        a, b = P[(i - 1) % m], P[(i + 1) % m]
+        return ((b[0] - a[0]) / 2, (b[1] - a[1]) / 2)
+
+    dense, marks = [], []
+    segs = m if closed else m - 1
+    for i in range(segs):
+        j = (i + 1) % m
+        m0 = tangent(i, j)
+        m1 = (P[j][0] - P[i][0], P[j][1] - P[i][1]) if corner[j] else tangent(j, j)
+        marks.append(len(dense))
+        dense += hermite(P[i], P[j], m0, m1, n)
+    if not closed:
+        marks.append(len(dense))
+        dense.append(P[-1])
+    return dense, marks, corner
+
+
+def place_dots(outline, count):
+    """count dots along the closed outline: every corner gets one, the rest are spread by length."""
+    dense, marks, corner = spline(outline)
+    L = len(dense)
+    stops = [marks[i] for i in range(len(outline)) if corner[i]] or [0]
+    seg = lambda a, b: sum(math.dist(dense[k % L], dense[(k + 1) % L]) for k in range(a, b))
+    spans = [(stops[i], stops[(i + 1) % len(stops)] + (L if i + 1 == len(stops) else 0)) for i in range(len(stops))]
+    lengths = [seg(a, b) for a, b in spans]
+    total = sum(lengths)
+    extra = max(0, count - len(stops))
+    share = [lengths[i] / total * extra for i in range(len(spans))]
+    alloc = [int(s) for s in share]
+    for i in sorted(range(len(spans)), key=lambda i: share[i] - alloc[i], reverse=True)[:extra - sum(alloc)]:
+        alloc[i] += 1
+    out = []
+    for (a, b), k, length in zip(spans, alloc, lengths):
+        out.append(dense[a % L])
+        if k:
+            step = length / (k + 1)
+            acc, want = 0.0, step
+            for j in range(a, b):
+                p, q = dense[j % L], dense[(j + 1) % L]
+                d = math.dist(p, q)
+                while d and acc + d >= want and len(out) < 10 ** 6 and want < length - 1e-9:
+                    u = (want - acc) / d
+                    out.append((p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u))
+                    want += step
+                acc += d
+    return out, dense
+
+
+def label_positions(dots, curve, details_pts):
+    """Puts each number next to its dot, away from the outline, other dots and other numbers."""
+    n = len(dots)
+    area = sum(dots[i][0] * dots[(i + 1) % n][1] - dots[(i + 1) % n][0] * dots[i][1] for i in range(n))
+    sign = 1 if area > 0 else -1
+    f = font(BOLD, NUM_PT)
+    boxes = []
+    obstacles = curve[::2] + details_pts
+    out = []
+    for i, (x, y) in enumerate(dots):
+        a, b = dots[i - 1], dots[(i + 1) % n]
+        tx, ty = b[0] - a[0], b[1] - a[1]
+        tl = math.hypot(tx, ty) or 1
+        nx, ny = sign * ty / tl, -sign * tx / tl          # outward normal
+        w = f.getlength(str(i + 1)) / S
+        h = NUM_PT * 0.72
+        best = None
+        for dist in (DOT_R + 6, DOT_R + 9, DOT_R + 13):
+            for turn in (0, 35, -35, 70, -70, 110, -110, 150, -150, 180):
+                c, s = math.cos(math.radians(turn)), math.sin(math.radians(turn))
+                dx, dy = nx * c - ny * s, nx * s + ny * c
+                cx, cy = x + dx * (dist + w / 2 * abs(dx)), y + dy * (dist + h / 2 * abs(dy))
+                box = (cx - w / 2 - 1, cy - h / 2 - 1, cx + w / 2 + 1, cy + h / 2 + 1)
+                if any(box[0] < bx1 and bx0 < box[2] and box[1] < by1 and by0 < box[3] for bx0, by0, bx1, by1 in boxes):
+                    continue
+                if any(box[0] - 1.5 < px < box[2] + 1.5 and box[1] - 1.5 < py < box[3] + 1.5 for px, py in obstacles):
+                    continue
+                if any(j != i and box[0] - DOT_R < px < box[2] + DOT_R and box[1] - DOT_R < py < box[3] + DOT_R
+                       for j, (px, py) in enumerate(dots)):
+                    continue
+                own = math.hypot(cx - x, cy - y)
+                if any(j != i and math.hypot(cx - px, cy - py) < own for j, (px, py) in enumerate(dots)):
+                    continue                             # the number must sit closest to its own dot
+
+                best = (cx, cy, box)
+                break
+            if best:
+                break
+        if not best:
+            cx, cy = x + nx * (DOT_R + 7), y + ny * (DOT_R + 7)
+            best = (cx, cy, (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2))
+        boxes.append(best[2])
+        out.append(best[:2])
+    return out
+
+
+def detail_paths(details):
+    """Details as (kind, points, extra) in figure coordinates."""
+    out = []
+    for d in details:
+        kind = d[0]
+        if kind == "line":
+            out.append(("stroke", spline(d[1], closed=False)[0], False))
+        elif kind == "loop":
+            out.append(("stroke", spline(d[1])[0], True))
+        elif kind in ("circle", "eye"):
+            x, y, r = d[1:]
+            out.append(("stroke", [(x + r * math.cos(t / 24 * math.pi), y + r * math.sin(t / 24 * math.pi))
+                                   for t in range(48)], True))
+            if kind == "eye":
+                out.append(("fill", [(x + r * 0.5 * math.cos(t / 12 * math.pi), y - r * 0.15 + r * 0.5 * math.sin(t / 12 * math.pi))
+                                     for t in range(24)], True))
+        elif kind == "dot":
+            x, y, r = d[1:]
+            out.append(("fill", [(x + r * math.cos(t / 12 * math.pi), y + r * math.sin(t / 12 * math.pi))
+                                 for t in range(24)], True))
+    return out
 
 
 class Dots:
@@ -82,30 +155,53 @@ class Dots:
 
     def __init__(self, rnd, level, theme, number, ctx):
         self.level, self.number = level, number
-        used = ctx.setdefault("used", set())
-        want = round(level * (len(SHAPES) - 1))
-        free = [i for i in range(len(SHAPES)) if i not in used] or list(range(len(SHAPES)))
-        idx = min(free, key=lambda i: abs(i - want))
-        used.add(idx)
-        self.name, self.raw = SHAPES[idx]
+        if "order" not in ctx:
+            own = [f for f in theme.get("dots", []) if f in FIGURES]
+            rest = [f for f in FIGURES if f not in own]
+            rnd.shuffle(own)
+            rnd.shuffle(rest)
+            ctx["order"] = own + rest
+        order = ctx["order"]
+        self.name = order[(number - 1) % len(order)]
+        fig = FIGURES[self.name]
+        self.count = 25 + round(50 * level)
+        self.outline, self.details = fig["outline"], fig["details"]
+
+    def _geometry(self, x0, y0, x1, y1):
+        dots, dense = place_dots(self.outline, self.count)
+        paths = detail_paths(self.details)
+        allp = dense + [p for _, pts, _ in paths for p in pts]
+        bx0, by0 = min(p[0] for p in allp), min(p[1] for p in allp)
+        bx1, by1 = max(p[0] for p in allp), max(p[1] for p in allp)
+        k = min((x1 - x0) / (bx1 - bx0), (y1 - y0) / (by1 - by0))
+        ox, oy = (x0 + x1) / 2 - (bx0 + bx1) / 2 * k, (y0 + y1) / 2 - (by0 + by1) / 2 * k
+        T = lambda p: (ox + p[0] * k, oy + p[1] * k)
+        return [T(p) for p in dots], [T(p) for p in dense], [(kind, [T(p) for p in pts], c) for kind, pts, c in paths]
+
+    def _details(self, C, paths, lw):
+        for kind, pts, closed in paths:
+            if kind == "fill":
+                C.poly(pts, 0)
+            else:
+                C.stroke(pts, lw, closed=closed)
 
     def page(self, C, n):
         x0, x1 = frame(n)
-        N = len(self.raw)
-        top = header(C, n, f"Dot to Dot {self.number}", f"Join the dots from 1 to {N} to find the hidden picture!")
-        pts, _ = fit_to_box(self.raw, x0 + 70, BOTTOM + 84, x1 - 70, top - 28)
-        dirs = label_dirs(pts)
-        pt = 17 if N <= 12 else (15 if N <= 16 else 13)
-        for i, ((x, y), (dx, dy)) in enumerate(zip(pts, dirs)):
-            C.dot(x, y, 4.6)
-            d = 4.6 + pt * 0.62 + 3
-            C.text(x + dx * d, y + dy * d, str(i + 1), BOLD, pt, "mm")
-        C.ring(pts[0][0], pts[0][1], 9.5, 1.6)
-        C.text((x0 + x1) / 2, BOTTOM + 14, "Then join the last dot back to dot 1 and colour the picture!", REG, 13, "ms")
+        top = header(C, n, f"Dot to Dot {self.number}",
+                     f"Join the dots from 1 to {self.count}, then join {self.count} back to 1. Colour your picture!")
+        dots, dense, paths = self._geometry(x0 + 30, BOTTOM + 20, x1 - 30, top - 20)
+        self._details(C, paths, 2.2)
+        labels = label_positions(dots, dense, [p for _, pts, _ in paths for p in pts[::2]])
+        for i, ((x, y), (lx, ly)) in enumerate(zip(dots, labels)):
+            C.dot(x, y, DOT_R)
+            C.text(lx, ly, str(i + 1), BOLD, NUM_PT, "mm")
+        C.ring(dots[0][0], dots[0][1], DOT_R + 3.2, 1.2)
         footer_level(C, n, self.level)
 
     def answer(self, C, x0, y0, x1, y1):
-        pts, _ = fit_to_box(self.raw, x0 + 20, y0 + 26, x1 - 20, y1 - 6)
-        C.stroke(pts, 2.4, closed=True)
-        art = "an" if self.name[0] in "aeiou" else "a"
-        C.text((x0 + x1) / 2, y0 + 4, f"It's {art} {self.name}!", REG, 12, "ms")
+        dots, dense, paths = self._geometry(x0 + 10, y0 + 22, x1 - 10, y1 - 4)
+        C.stroke(dense, 1.8, closed=True)
+        self._details(C, paths, 1.2)
+        name = self.name.replace("gingerbread", "gingerbread man")
+        art = "an" if name[0] in "aeiou" else "a"
+        C.text((x0 + x1) / 2, y0 + 4, f"It's {art} {name}!", REG, 12, "ms")

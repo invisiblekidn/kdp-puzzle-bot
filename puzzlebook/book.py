@@ -8,7 +8,7 @@ from functools import partial
 from .icons import draw_icon
 from .layout import BOTTOM, bullets, frame, grid_cells, header, para
 from .lib import BOLD, OUT_H, OUT_W, PH, PW, REG, TITLE_FONT, Canvas, PdfWriter, wrap
-from .puzzles.dots import MAX_COUNT as MAX_DOTS, Dots
+from .puzzles.dots import Dots
 from .puzzles.hidden import Hidden
 from .puzzles.maze import Maze
 from .puzzles.wordsearch import WordSearch
@@ -16,7 +16,7 @@ from .themes import get_theme
 
 PUZZLES = {cls.kind: cls for cls in (Maze, WordSearch, Hidden, Dots)}
 ORDER = ["maze", "wordsearch", "hidden", "dots"]
-LIMITS = {"dots": MAX_DOTS}
+LIMITS = {}
 LEVELS = {"easy": 0.15, "medium": 0.5, "hard": 0.85}
 MIN_PAGES = 24                       # KDP paperback minimum
 
