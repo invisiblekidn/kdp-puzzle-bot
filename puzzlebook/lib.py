@@ -2,9 +2,10 @@
 
 A page is drawn on a supersampled grayscale canvas in PDF points (1/72 in, y axis up),
 then downsampled to 300 DPI and written into a PDF by a tiny built-in writer.
-Only Pillow is needed (no downloads).
+Only Pillow is needed. Fonts (SIL Open Font License) ship in the fonts/ folder.
 """
 import math
+import os
 import zlib
 
 from PIL import Image, ImageDraw, ImageFont
@@ -15,15 +16,19 @@ S = DPI / 72 * SS                   # device pixels per point while drawing
 PW, PH = 612.0, 792.0               # 8.5 x 11 in
 OUT_W, OUT_H = round(PW * DPI / 72), round(PH * DPI / 72)   # 2550 x 3300 px
 
-FONT_DIR = r"C:\Windows\Fonts"
-BOLD, REG = "comicbd.ttf", "comic.ttf"
+FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts")
+TITLE_FONT, BOLD, REG = "Fredoka.ttf", "Andika-Bold.ttf", "Andika-Regular.ttf"
+VARIATIONS = {TITLE_FONT: [600, 100]}     # Fredoka is a variable font: weight, width
 _fonts = {}
 
 
 def font(name, pt):
     key = (name, pt)
     if key not in _fonts:
-        _fonts[key] = ImageFont.truetype(f"{FONT_DIR}\\{name}", round(pt * S))
+        f = ImageFont.truetype(os.path.join(FONT_DIR, name), round(pt * S))
+        if name in VARIATIONS:
+            f.set_variation_by_axes(VARIATIONS[name])
+        _fonts[key] = f
     return _fonts[key]
 
 

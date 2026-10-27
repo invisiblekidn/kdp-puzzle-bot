@@ -4,15 +4,17 @@ Each icon is designed in a -50..50 box (y up) and scaled to the requested size i
 """
 import math
 
-from lib import ellipse_pts
+from .lib import ellipse_pts
 
 
 class Ctx:
-    def __init__(self, C, cx, cy, size):
+    def __init__(self, C, cx, cy, size, rot=0.0):
         self.C, self.cx, self.cy, self.k = C, cx, cy, size / 100.0
         self.lw = max(1.5, 3.2 * self.k)
+        self.cr, self.sr = math.cos(math.radians(rot)), math.sin(math.radians(rot))
 
     def pt(self, x, y):
+        x, y = x * self.cr - y * self.sr, x * self.sr + y * self.cr
         return (self.cx + x * self.k, self.cy + y * self.k)
 
     def pts(self, ps):
@@ -240,10 +242,63 @@ def scissors(c):
     c.circ(0, 0, 3.5)
 
 
+def pumpkin(c):
+    c.poly([(-4, 26), (4, 26), (8, 42), (0, 44)])
+    c.union([(-22, -6, 24), (22, -6, 24), (0, -4, 28)])
+    c.arc(-10, -6, 9, 26, 110, 250, w=c.lw * 0.8)
+    c.arc(10, -6, 9, 26, -70, 70, w=c.lw * 0.8)
+
+
+def ghost(c):
+    pts = ellipse_pts(0, 8, 30, 34, 0, 0, 180, 40)
+    pts.append((-30, -40))
+    for i in range(1, 7):
+        pts.append((-30 + 10 * i, -32 if i % 2 else -40))
+    c.poly(pts)
+    c.ell(-11, 14, 5, 7, fill=0)
+    c.ell(11, 14, 5, 7, fill=0)
+    c.ell(0, -4, 6, 8, fill=None, w=c.lw * 0.8)
+
+
+def gift(c):
+    c.poly([(-38, -40), (38, -40), (38, 12), (-38, 12)])
+    c.poly([(-44, 12), (44, 12), (44, 28), (-44, 28)])
+    c.poly([(-8, -40), (8, -40), (8, 28), (-8, 28)], fill=None)
+    c.ell(-14, 36, 14, 9, rot=20)
+    c.ell(14, 36, 14, 9, rot=-20)
+    c.circ(0, 31, 5)
+
+
+def snowman(c):
+    c.circ(0, -22, 26)
+    c.circ(0, 18, 18)
+    c.poly([(-16, 32), (16, 32), (12, 34), (12, 50), (-12, 50), (-12, 34)])
+    c.dot(-6, 22, 2.6)
+    c.dot(6, 22, 2.6)
+    c.poly([(0, 16), (12, 13), (0, 12)], fill=0, w=c.lw * 0.5)
+    for y in (-12, -22, -32):
+        c.dot(0, y, 2.8)
+
+
+def rocket(c):
+    c.poly([(-14, -20), (-30, -40), (-14, -38)])
+    c.poly([(14, -20), (30, -40), (14, -38)])
+    c.poly([(0, 48), (14, 26), (14, -34), (-14, -34), (-14, 26)])
+    c.circ(0, 10, 7)
+    c.poly([(-8, -34), (8, -34), (0, -48)])
+
+
+def planet(c):
+    c.ell(0, 0, 48, 12, rot=-18)
+    c.circ(0, 0, 26)
+    c.C.stroke(c.pts(ellipse_pts(0, 0, 48, 12, -18, 192, 348, 30)), c.lw)
+
+
 ICONS = {f.__name__: f for f in (
     star, heart, flower, apple, house, fish, cloud, sun, moon, balloon, flag, ball,
-    carrot, cheese, tree, boat, car, bunny, mouse, bee, scissors)}
+    carrot, cheese, tree, boat, car, bunny, mouse, bee, scissors,
+    pumpkin, ghost, gift, snowman, rocket, planet)}
 
 
-def draw_icon(C, name, cx, cy, size):
-    ICONS[name](Ctx(C, cx, cy, size))
+def draw_icon(C, name, cx, cy, size, rot=0.0):
+    ICONS[name](Ctx(C, cx, cy, size, rot))
