@@ -44,8 +44,9 @@ python make_book.py --theme christmas --maze 10 --wordsearch 10 --hidden 6 --dot
 - `puzzlebook/book.py`: сборка всей книги.
 - `puzzlebook/style.py`: оформление страниц в стиле книги MAZES (рамка, тематические уголки, пейзаж внизу
   с номером страницы, искорки на свободном месте, крупные контурные заголовки).
-- `fonts/`: Andika, Fredoka, Griffy, Creepster, Audiowide (SIL Open Font License), Luckiest Guy и
-  Mountains of Christmas (Apache 2.0). Все можно использовать в коммерческих книгах, лицензии лежат рядом.
+- `fonts/`: у каждой темы свои шрифты (Хэллоуин: Creepster + Griffy, Рождество: Mountains of Christmas +
+  Berkshire Swash, Космос: Audiowide + Electrolize, Животные: Luckiest Guy + Sniglet), плюс Andika и Fredoka.
+  Лицензии SIL Open Font License, у Luckiest Guy и Mountains of Christmas Apache 2.0. Все можно использовать в коммерческих книгах, лицензии лежат рядом.
 - `assets/logo/`: логотипы Invisible KID. Горизонтальный стоит на титульном листе, на сертификате и на
   обложке (на белой плашке), компактный на странице «This book belongs to», значок K рядом с номером
   каждой страницы и внизу корешка. Чтобы заменить логотип, положите PNG с прозрачным фоном под тем же именем.

@@ -17,10 +17,10 @@ SCENE_H = 80.0                                        # height of the bottom lan
 CONTENT_BOTTOM = EDGE_Y + SCENE_H + 8                 # puzzles stay above this
 
 FONTS = {   # display font for titles, font for the small line under them, title size factor
-    "christmas": ("MountainsofChristmas-Bold.ttf", "Griffy-Regular.ttf", 1.1),
+    "christmas": ("MountainsofChristmas-Bold.ttf", "BerkshireSwash-Regular.ttf", 1.1),
     "halloween": ("Creepster-Regular.ttf", "Griffy-Regular.ttf", 1.0),
-    "space": ("Audiowide-Regular.ttf", "Griffy-Regular.ttf", 0.82),
-    "animals": ("LuckiestGuy-Regular.ttf", "Griffy-Regular.ttf", 0.9),
+    "space": ("Audiowide-Regular.ttf", "Electrolize-Regular.ttf", 0.82),
+    "animals": ("LuckiestGuy-Regular.ttf", "Sniglet-Regular.ttf", 0.9),
 }
 HEROES = {"christmas": "snowman", "halloween": "pumpkin", "space": "rocket", "animals": "bunny"}
 TAGLINES = {"christmas": "a merry little puzzle book", "halloween": "a spookily fun puzzle book",

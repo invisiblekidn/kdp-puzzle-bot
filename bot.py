@@ -11,7 +11,8 @@ from logging.handlers import RotatingFileHandler
 
 import httpx
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton as Btn, InlineKeyboardMarkup, InputMediaPhoto, Update
+from telegram import (BotCommand, InlineKeyboardButton as Btn, InlineKeyboardMarkup, InputMediaPhoto, MenuButtonCommands,
+                      Update)
 from telegram.constants import ParseMode
 from telegram.error import NetworkError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
@@ -115,7 +116,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "Привет! Я собираю книги-головоломки для Amazon KDP.\n\n"
-        "/new — новая книга\n/help — подсказка\n\n"
+        "/new — новая книга\n/help — подсказка\nЭти же команды есть под кнопкой «Меню» слева от поля ввода.\n\n"
         "Бот присылает три файла для KDP: interior.pdf (страницы книги, 8.5×11\", ч/б), cover.pdf (цветная обложка "
         "с корешком) и listing.txt (название, описание, ключевые слова). Копия сохраняется в папку books на компьютере.")
 
@@ -289,6 +290,20 @@ class PatientRequest(HTTPXRequest):
                 await asyncio.sleep(2 * (attempt + 1))
 
 
+MENU = [BotCommand("new", "📚 Новая книга"),
+        BotCommand("help", "❓ Как пользоваться"),
+        BotCommand("start", "🏠 Начало")]
+
+
+async def setup_menu(app):
+    """The "Menu" button left of the input field, as in the IQRacer bot: Telegram lists these commands."""
+    try:
+        await app.bot.set_my_commands(MENU)
+        await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except NetworkError as e:
+        log.warning("could not set the menu button: %r", e)
+
+
 def main():
     token = os.getenv("BOT_TOKEN", "").strip()
     if not token or token.startswith("вставьте"):
@@ -298,6 +313,7 @@ def main():
     app = (Application.builder().token(token)
            .request(PatientRequest(connection_pool_size=8, **timeouts))
            .get_updates_request(PatientRequest(**timeouts))
+           .post_init(setup_menu)
            .build())
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
