@@ -26,10 +26,17 @@ HEROES = {"christmas": "snowman", "halloween": "pumpkin", "space": "rocket", "an
 TAGLINES = {"christmas": "a merry little puzzle book", "halloween": "a spookily fun puzzle book",
             "space": "an out-of-this-world puzzle book", "animals": "a wild and happy puzzle book"}
 
-_theme = {"key": "animals"}
+_theme = {"key": "animals", "art": {}}
 
 
-def set_theme(key):
+def set_theme(key, theme=None):
+    """theme: the theme dict; a theme made by the image model brings its own fonts and pictures."""
+    art = (theme or {}).get("art")
+    if art:
+        FONTS[key] = (art["font"], art["sub_font"], art["font_k"])
+        HEROES[key] = art["hero"]
+        TAGLINES[key] = art["tagline"]
+        _theme["art"] = art
     _theme["key"] = key if key in FONTS else "animals"
 
 
@@ -193,11 +200,18 @@ def corners(C, n):
             sparkle(C, lx + dx, ty + dy, r, 0)
         draw_icon(C, "moon", rx - 34, ty - 34, 50)
         draw_icon(C, "rocket", rx - 86, ty - 70, 34, 30)
-    else:
+    elif key == "animals":
         draw_icon(C, "sun", lx + 36, ty - 36, 62)
         draw_icon(C, "cloud", rx - 42, ty - 30, 58)
         bird(C, rx - 92, ty - 30, 8)
         bird(C, rx - 74, ty - 50, 6)
+    else:                                                # a theme with generated pictures
+        left, right = _theme["art"]["corners"]
+        draw_icon(C, left, lx + 38, ty - 38, 62, -8)
+        draw_icon(C, right, rx - 38, ty - 38, 58, 8)
+        for dx, dy, r in ((82, -16, 5), (16, -82, 4)):
+            sparkle(C, lx + dx, ty + dy, r, 0)
+            sparkle(C, rx - dx, ty + dy, r, 0)
 
 
 # ------------------------------------------------------------------ scene
@@ -214,7 +228,7 @@ def scene(C, n, label):
         return base + amp * math.sin((x - bx0) / w * math.pi * 3 + phase)
 
     xs = [bx0 + w * i / 80 for i in range(81)]
-    fill = {"halloween": 200, "christmas": 250, "space": 222, "animals": 236}[key]
+    fill = {"halloween": 200, "christmas": 250, "space": 222, "animals": 236}.get(key, 236)
     C.poly([(bx0, by0)] + [(x, top(x)) for x in xs] + [(bx1, by0)], fill)
 
     def stand(name, f, size, rot=0.0):
@@ -255,6 +269,14 @@ def scene(C, n, label):
         draw_icon(C, "planet", bx0 + w * 0.26, top(bx0 + w * 0.26) + 34, 30, 10)
         for f in (0.4, 0.58, 0.7):
             sparkle(C, bx0 + w * f, top(bx0 + w * f) + 26, 4, 0)
+    elif key != "animals":                               # generated pictures along the hill
+        pics = _theme["art"]["scene"]
+        for i, (f, size) in enumerate(((0.07, 50), (0.2, 34), (0.33, 40), (0.67, 40), (0.8, 34), (0.93, 50))):
+            stand(pics[i % len(pics)], f, size, (-6, 5, -3, 4, -5, 6)[i])
+        for f in (0.13, 0.27, 0.73, 0.87):
+            x = bx0 + w * f
+            for d in (-3, 0, 3):
+                C.stroke([(x + d, top(x) - 6), (x + d * 1.6, top(x) - 14)], 1.0)
     else:
         stand("tree", 0.06, 54)
         stand("tree", 0.94, 54)
@@ -293,7 +315,7 @@ def scatter(C, n, density=1.0):
     bx0, by0, bx1, by1 = border_box(n)
     rnd = random.Random(f"sparkle:{theme_key()}:{n}")
     pics = {"halloween": ["ghost", "moon"], "christmas": ["star", "gift"], "space": ["star", "planet"],
-            "animals": ["flower", "heart"]}[theme_key()]
+            "animals": ["flower", "heart"]}.get(theme_key()) or _theme["art"]["faint"]
     placed = []
     for _ in range(int(900 * density)):
         x, y = rnd.uniform(bx0 + 12, bx1 - 12), rnd.uniform(by0 + SCENE_H + 4, by1 - 12)

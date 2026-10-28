@@ -50,8 +50,8 @@ def make_listing(book, paper="white"):
     spine = spine_width(pages, paper)
     lines = [
         f"KDP PAPERBACK LISTING: {book.title}",
-        f"Вариант (seed): {spec.seed}, тема: {spec.theme_name or spec.theme}"
-        + (f" (оформление {spec.theme})" if spec.theme_name else "") + f", страниц: {pages}",
+        f"Вариант (seed): {spec.seed}, тема: {book.theme['name'] if spec.theme_pack else spec.theme_name or spec.theme}"
+        + (" (нейросеть)" if spec.theme_pack else f" (оформление {spec.theme})" if spec.theme_name else "") + f", страниц: {pages}",
         "",
         "Как пользоваться: на сайте kdp.amazon.com создайте Paperback и копируйте поля отсюда по порядку.",
         "Тексты ниже на английском, потому что книга для американского Amazon.",
@@ -91,10 +91,23 @@ def make_listing(book, paper="white"):
         "  Если поменяете тип бумаги или число страниц, обложку нужно собрать заново.",
         "",
         "AI-Generated Content (честный ответ на вопрос KDP про ИИ):",
-        "  Images: No. Все головоломки и картинки нарисованы программой по алгоритмам, без ИИ.",
+    ]
+    if book.theme.get("ai"):
+        lines += [
+            "  Images: Yes, Many AI-generated images, with minimal or no editing.",
+            "    Картинки темы нарисовала нейросеть FLUX.1 [schnell] (Cloudflare Workers AI), программа их только",
+            "    почистила и вырезала. Tool: FLUX.1 schnell (Black Forest Labs).",
+        ]
+    else:
+        lines.append("  Images: No. Все головоломки и картинки нарисованы программой по алгоритмам, без ИИ.")
+    lines += [
         "  Text: Yes, Some sections, with minimal or no editing (если сами переписали тексты: with extensive editing).",
         "    Шаблоны текстов (описание, инструкции и подписи в книге, задняя обложка) написаны с помощью Claude.",
         "    Tool: Claude (Anthropic).",
+    ]
+    if book.theme.get("ai"):
+        lines.append("    Слова, сюжеты лабиринтов и ключевые слова темы придумала нейросеть. Tool: Llama 3.3 (Meta).")
+    lines += [
         "  Translations: No.",
         "",
         "=== 3. Pricing ===",
@@ -102,6 +115,6 @@ def make_listing(book, paper="white"):
         "Территории: All territories. Цену выбирайте сами: KDP покажет минимальную цену и роялти",
         f"для этого числа страниц ({pages}).",
         "",
-        "Шрифты в книге: Andika и Fredoka (SIL Open Font License, коммерческое использование разрешено).",
+        "Шрифты в книге: только с лицензиями SIL Open Font License или Apache 2.0, коммерческое использование разрешено.",
     ]
     return "\n".join(lines) + "\n"

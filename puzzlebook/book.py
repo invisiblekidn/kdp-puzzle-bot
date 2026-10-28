@@ -35,6 +35,7 @@ class BookSpec:
     seed: int = 0                    # same seed + same settings = the same book
     theme_name: str = ""             # the author's own theme, drawn in the style of `theme`
     words: list = None               # the author's own word search words
+    theme_pack: str = ""             # folder of a theme made by the neural network (aitheme.build)
     answers: bool = True
 
 
@@ -52,11 +53,18 @@ def section_names(kinds):
 class Book:
     def __init__(self, spec):
         self.spec = spec
-        self.theme = get_theme(spec.theme)
-        if spec.theme_name or spec.words:
-            self.theme = custom_theme(self.theme, spec.theme_name, spec.words)
-        self.theme_key = (spec.theme or "animals").strip().lower()
-        style.set_theme(self.theme_key)
+        if spec.theme_pack:
+            from .aitheme import load
+            self.theme = dict(load(spec.theme_pack))
+            self.theme_key = "ai"
+            if spec.words:
+                self.theme["words"] = list(spec.words)
+        else:
+            self.theme = get_theme(spec.theme)
+            if spec.theme_name or spec.words:
+                self.theme = custom_theme(self.theme, spec.theme_name, spec.words)
+            self.theme_key = (spec.theme or "animals").strip().lower()
+        style.set_theme(self.theme_key, self.theme)
         if spec.difficulty not in LEVELS and spec.difficulty != "progressive":
             raise ValueError(f"Unknown difficulty '{spec.difficulty}'")
         self.kinds = [k for k in ORDER if spec.counts.get(k, 0) > 0]
@@ -200,7 +208,7 @@ class Book:
     # -------------------------------------------------------------- output
     def draw_page(self, n):
         """Page n (1-based) with its decoration, on a fresh canvas."""
-        style.set_theme(self.theme_key)
+        style.set_theme(self.theme_key, self.theme)
         fn, footer = self.pages[n - 1]
         C = Canvas()
         fn(C, n)

@@ -300,5 +300,27 @@ ICONS = {f.__name__: f for f in (
     pumpkin, ghost, gift, snowman, rocket, planet)}
 
 
+RASTER = {}        # pictures made for a theme by the image model (RGBA: black lines, white inside)
+
+
 def draw_icon(C, name, cx, cy, size, rot=0.0):
-    ICONS[name](Ctx(C, cx, cy, size, rot))
+    if name in RASTER:
+        draw_raster(C, RASTER[name], cx, cy, size, rot)
+    else:
+        ICONS[name](Ctx(C, cx, cy, size, rot))
+
+
+def draw_raster(C, img, cx, cy, size, rot=0.0):
+    """A picture in the same box as the drawn icons; lines and fill follow the canvas colour remapping."""
+    from PIL import Image, ImageChops, ImageOps
+    from .lib import S
+    k = size * 0.95 * S / max(img.size)
+    im = img.resize((max(1, round(img.width * k)), max(1, round(img.height * k))), Image.LANCZOS)
+    if rot:
+        im = im.rotate(rot, Image.BICUBIC, expand=True)
+    alpha = im.getchannel("A")
+    lines = ImageChops.multiply(ImageOps.invert(im.getchannel("R")), alpha)
+    px, py = C._p(cx, cy)
+    at = (round(px - im.width / 2), round(py - im.height / 2))
+    C.im.paste(C.ink(255), at + (at[0] + im.width, at[1] + im.height), alpha)
+    C.im.paste(C.ink(0), at + (at[0] + im.width, at[1] + im.height), lines)

@@ -166,10 +166,16 @@ class Dots:
         fig = FIGURES[self.name]
         self.count = 20 + round(25 * level)             # 20 .. 45 dots
         self.outline, self.details = fig["outline"], fig["details"]
+        self.raster = fig.get("raster")                 # inner lines of a generated picture
+        self.raster_pts = fig.get("detail_pts", [])
+        self.label = fig.get("label", self.name.replace("gingerbread", "gingerbread man"))
 
     def _geometry(self, x0, y0, x1, y1):
         dots, dense = place_dots(self.outline, self.count)
         paths = detail_paths(self.details)
+        if self.raster:
+            bx0, by0, bx1, by1 = self.raster[1]
+            paths.append(("raster", [(bx0, by0), (bx1, by1)] + self.raster_pts, False))
         allp = dense + [p for _, pts, _ in paths for p in pts]
         bx0, by0 = min(p[0] for p in allp), min(p[1] for p in allp)
         bx1, by1 = max(p[0] for p in allp), max(p[1] for p in allp)
@@ -180,7 +186,10 @@ class Dots:
 
     def _details(self, C, paths, lw):
         for kind, pts, closed in paths:
-            if kind == "fill":
+            if kind == "raster":
+                (ax, ay), (bx, by) = pts[:2]
+                C.image(self.raster[0], (ax + bx) / 2, (ay + by) / 2, w=bx - ax)
+            elif kind == "fill":
                 C.poly(pts, 0)
             else:
                 C.stroke(pts, lw, closed=closed)
@@ -201,6 +210,6 @@ class Dots:
         dots, dense, paths = self._geometry(x0 + 10, y0 + 22, x1 - 10, y1 - 4)
         C.stroke(dense, 1.8, closed=True)
         self._details(C, paths, 1.2)
-        name = self.name.replace("gingerbread", "gingerbread man")
-        art = "an" if name[0] in "aeiou" else "a"
+        name = self.label
+        art = "an" if name[0].lower() in "aeiou" else "a"
         C.text((x0 + x1) / 2, y0 + 4, f"It's {art} {name}!", REG, 12, "ms")
