@@ -50,7 +50,8 @@ def make_listing(book, paper="white"):
     spine = spine_width(pages, paper)
     lines = [
         f"KDP PAPERBACK LISTING: {book.title}",
-        f"Вариант (seed): {spec.seed}, тема: {spec.theme}, страниц: {pages}",
+        f"Вариант (seed): {spec.seed}, тема: {spec.theme_name or spec.theme}"
+        + (f" (оформление {spec.theme})" if spec.theme_name else "") + f", страниц: {pages}",
         "",
         "Как пользоваться: на сайте kdp.amazon.com создайте Paperback и копируйте поля отсюда по порядку.",
         "Тексты ниже на английском, потому что книга для американского Amazon.",

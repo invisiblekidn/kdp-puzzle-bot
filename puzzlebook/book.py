@@ -13,7 +13,7 @@ from .puzzles.dots import Dots
 from .puzzles.hidden import Hidden
 from .puzzles.maze import Maze
 from .puzzles.wordsearch import WordSearch
-from .themes import get_theme
+from .themes import custom_theme, get_theme
 
 PUZZLES = {cls.kind: cls for cls in (Maze, WordSearch, Hidden, Dots)}
 ORDER = ["maze", "wordsearch", "hidden", "dots"]
@@ -33,6 +33,8 @@ class BookSpec:
     ages: str = "Ages 6-8"
     year: int = 2026
     seed: int = 0                    # same seed + same settings = the same book
+    theme_name: str = ""             # the author's own theme, drawn in the style of `theme`
+    words: list = None               # the author's own word search words
     answers: bool = True
 
 
@@ -51,6 +53,8 @@ class Book:
     def __init__(self, spec):
         self.spec = spec
         self.theme = get_theme(spec.theme)
+        if spec.theme_name or spec.words:
+            self.theme = custom_theme(self.theme, spec.theme_name, spec.words)
         self.theme_key = (spec.theme or "animals").strip().lower()
         style.set_theme(self.theme_key)
         if spec.difficulty not in LEVELS and spec.difficulty != "progressive":

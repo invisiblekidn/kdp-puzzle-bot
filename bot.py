@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import time
 from logging.handlers import RotatingFileHandler
 
@@ -40,6 +41,7 @@ KINDS = {"maze": "🌀 Лабиринты", "wordsearch": "🔤 Поиск сл�
 TOTALS = [20, 30, 40, 50, 60]
 LEVELS = {"progressive": "📈 Нарастает (советую)", "easy": "🙂 Лёгкая", "medium": "😐 Средняя", "hard": "🤯 Сложная"}
 
+THEME_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9 '&-]{1,29}$")   # English: the book is for the US Amazon
 build_lock = asyncio.Lock()          # one book at a time: building uses the whole processor
 
 
@@ -78,10 +80,37 @@ def kb(rows):
     return InlineKeyboardMarkup([[Btn(text, callback_data=data) for text, data in row] for row in rows])
 
 
-def theme_keyboard():
+def theme_keyboard(prefix="theme", custom=True):
     items = list(THEMES.items())
-    return kb([[(items[i][1], f"theme:{items[i][0]}"), (items[i + 1][1], f"theme:{items[i + 1][0]}")]
-               for i in range(0, len(items), 2)])
+    rows = [[(items[i][1], f"{prefix}:{items[i][0]}"), (items[i + 1][1], f"{prefix}:{items[i + 1][0]}")]
+            for i in range(0, len(items), 2)]
+    if custom:
+        rows.append([("✏️ Своя тема", "theme_custom")])
+    return kb(rows)
+
+
+def theme_label(d):
+    if d.get("theme_name"):
+        return f"✏️ {d['theme_name']} (оформление {THEMES[d['theme']]})"
+    return THEMES[d["theme"]]
+
+
+def theme_slug(d):
+    return re.sub(r"[^a-z0-9]+", "-", d["theme_name"].lower()).strip("-") if d.get("theme_name") else d["theme"]
+
+
+def parse_words(text):
+    """Word search words from free text: English letters only, 3-12 letters, no repeats."""
+    words, bad = [], []
+    for w in re.split(r"[\s,;.]+", text.upper()):
+        if not w:
+            continue
+        if re.fullmatch(r"[A-Z]{3,12}", w):
+            if w not in words:
+                words.append(w)
+        else:
+            bad.append(w)
+    return words, bad
 
 
 def kinds_keyboard(d):
@@ -100,7 +129,9 @@ def levels_keyboard():
 
 def summary(d):
     counts = split_counts(d["kinds"], d["total"])
-    lines = [f"Тема: <b>{THEMES[d['theme']]}</b>", f"Сложность: <b>{LEVELS[d['difficulty']]}</b>", ""]
+    lines = [f"Тема: <b>{theme_label(d)}</b>", f"Сложность: <b>{LEVELS[d['difficulty']]}</b>", ""]
+    if d.get("words") and "wordsearch" in d["kinds"]:
+        lines.insert(1, f"Слова для Word Search: {len(d['words'])} ваших")
     lines += [f"{KINDS[k]}: {n}" for k, n in counts.items()]
     pages = len(Book(spec_from(d, 0)).pages)
     lines += ["", f"Получится примерно <b>{pages} страниц</b> (с ответами и служебными страницами)."]
@@ -108,7 +139,8 @@ def summary(d):
 
 
 def spec_from(d, seed):
-    return BookSpec(theme=d["theme"], counts=split_counts(d["kinds"], d["total"]), difficulty=d["difficulty"], seed=seed)
+    return BookSpec(theme=d["theme"], counts=split_counts(d["kinds"], d["total"]), difficulty=d["difficulty"], seed=seed,
+                    theme_name=d.get("theme_name", ""), words=d.get("words"))
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -126,6 +158,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "Как пользоваться:\n1. Напишите /new\n2. Выберите тему, виды головоломок, количество и сложность\n"
+        "   Своя тема: кнопка «✏️ Своя тема», напишите её по-английски, выберите похожее оформление и, если "
+        "хотите, пришлите свои слова для Word Search.\n"
         "3. Нажмите «Собрать» и подождите 1–2 минуты\n4. Не понравилось — «Другой вариант»: те же настройки, "
         "новые головоломки.\n\nЕсли что-то сломалось, пришлите Claude файл logs/bot.log из папки бота.")
 
@@ -134,7 +168,8 @@ async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await allowed(update):
         return
     context.user_data.pop("draft", None)
-    await update.effective_message.reply_text("Выберите тему книги:", reply_markup=theme_keyboard())
+    context.user_data.pop("waiting", None)
+    await update.effective_message.reply_text("Выберите тему книги или напишите свою:", reply_markup=theme_keyboard())
 
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -143,11 +178,27 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data
     d = draft(context)
-    if data.startswith("theme:"):
+    if data.startswith("theme:") or data.startswith("style:"):
+        context.user_data.pop("waiting", None)
+        if data.startswith("theme:"):
+            d.pop("theme_name", None)
+            d.pop("words", None)
         d["theme"] = data.split(":", 1)[1]
         await q.answer()
-        await q.edit_message_text(f"Тема: {THEMES[d['theme']]}\n\nКакие головоломки положить в книгу?",
+        await q.edit_message_text(f"Тема: {theme_label(d)}\n\nКакие головоломки положить в книгу?",
                                   reply_markup=kinds_keyboard(d))
+    elif data == "theme_custom":
+        context.user_data["waiting"] = "theme_name"
+        await q.answer()
+        await q.edit_message_text(
+            "✏️ Напишите тему книги <b>по-английски</b>, 1–3 слова. Например: <code>Dinosaurs</code>, "
+            "<code>Ocean Animals</code>, <code>Easter</code>.\n\nКнига для американского Amazon, поэтому тема "
+            "попадёт в название, на обложку и в описание на английском.", parse_mode=ParseMode.HTML)
+    elif data == "words_skip":
+        context.user_data.pop("waiting", None)
+        d.pop("words", None)
+        await q.answer()
+        await q.edit_message_text("Сколько всего головоломок в книге?", reply_markup=totals_keyboard())
     elif data.startswith("kind:"):
         k = data.split(":", 1)[1]
         d["kinds"] = [x for x in ORDER if (x in d["kinds"]) != (x == k)]
@@ -158,6 +209,15 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Выберите хотя бы один вид", show_alert=True)
             return
         await q.answer()
+        if d.get("theme_name") and "wordsearch" in d["kinds"]:
+            context.user_data["waiting"] = "words"
+            await q.edit_message_text(
+                f"🔤 Пришлите слова для Word Search на тему «{d['theme_name']}»: <b>по-английски</b>, через запятую "
+                "или пробел, от 8 до 40 слов, в каждом от 3 до 12 букв. Например:\n"
+                "<code>dino, fossil, bone, egg, roar, claw, tail, volcano</code>\n\n"
+                f"Или нажмите «Пропустить», тогда возьму слова из оформления {THEMES[d['theme']]}.",
+                parse_mode=ParseMode.HTML, reply_markup=kb([[("⏭ Пропустить", "words_skip")]]))
+            return
         await q.edit_message_text("Сколько всего головоломок в книге?", reply_markup=totals_keyboard())
     elif data.startswith("total:"):
         d["total"] = int(data.split(":", 1)[1])
@@ -203,7 +263,7 @@ async def build_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, d, 
                 asyncio.run_coroutine_threadsafe(status.edit_text(f"⚙️ Собираю книгу… {pct}%"), loop)
 
         spec = spec_from(d, seed)
-        out_dir = os.path.join(BOOKS_DIR, time.strftime("%Y-%m-%d_%H-%M") + f"_{d['theme']}_{seed}")
+        out_dir = os.path.join(BOOKS_DIR, time.strftime("%Y-%m-%d_%H-%M") + f"_{theme_slug(d)}_{seed}")
         t0 = time.time()
         try:
             book, files, previews = await asyncio.to_thread(render, spec, out_dir, progress)
@@ -223,7 +283,7 @@ async def build_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, d, 
             await chat.send_media_group(media)
         margins = book.margin_report()
         captions = {
-            "interior": (f"📘 <b>{book.title}</b>\n{len(book.pages)} страниц, тема {THEMES[d['theme']]}, "
+            "interior": (f"📘 <b>{book.title}</b>\n{len(book.pages)} страниц, тема {theme_label(d)}, "
                          f"номер варианта {seed}\nПоля: {margins['gutter']:.2f}\" у корешка (KDP просит ≥ 0.375\")"),
             "cover": (f"🎨 Обложка для KDP: задняя сторона, корешок {files['spine']:.3f}\" и лицевая, "
                       f"с вылетами 0.125\". Белый прямоугольник сзади оставлен под штрихкод KDP."),
@@ -235,7 +295,7 @@ async def build_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, d, 
             ext = os.path.splitext(path)[1]
             last = key == "listing"
             with open(path, "rb") as f:
-                await chat.send_document(f, filename=f"{d['theme']}-{seed}-{key}{ext}", caption=captions[key],
+                await chat.send_document(f, filename=f"{theme_slug(d)}-{seed}-{key}{ext}", caption=captions[key],
                                          parse_mode=ParseMode.HTML,
                                          reply_markup=kb([[("🔄 Другой вариант", "again"), ("🆕 Новая книга", "new")]])
                                          if last else None)
@@ -259,6 +319,37 @@ def render(spec, out_dir, progress):
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await allowed(update):
+        return
+    waiting = context.user_data.get("waiting")
+    text = update.message.text.strip()
+    d = draft(context)
+    if waiting == "theme_name":
+        name = " ".join(text.split())
+        if not THEME_NAME.match(name) or len(name.split()) > 3:
+            await update.message.reply_text(
+                "Нужно 1–3 английских слова, только латинские буквы, например <code>Dinosaurs</code>. "
+                "Попробуйте ещё раз.", parse_mode=ParseMode.HTML)
+            return
+        context.user_data.pop("waiting", None)
+        d["theme_name"] = name
+        d.pop("words", None)
+        await update.message.reply_text(
+            f"Тема: <b>{name}</b>\n\nКакое оформление ближе? От него возьму картинки, шрифты, уголки страниц "
+            "и цвета обложки.", parse_mode=ParseMode.HTML, reply_markup=theme_keyboard("style", custom=False))
+        return
+    if waiting == "words":
+        words, bad = parse_words(text)
+        if len(words) < 8:
+            note = f"\nНе подошли: {', '.join(bad[:10])}" if bad else ""
+            await update.message.reply_text(
+                f"Подходящих слов: {len(words)}, а нужно хотя бы 8 (английские буквы, 3–12 в слове). "
+                f"Пришлите список ещё раз.{note}", reply_markup=kb([[("⏭ Пропустить", "words_skip")]]))
+            return
+        context.user_data.pop("waiting", None)
+        d["words"] = words[:40]
+        note = f"\nПропустил: {', '.join(bad[:10])}" if bad else ""
+        await update.message.reply_text(f"Слова приняты: {len(d['words'])}.{note}\n\nСколько всего головоломок в книге?",
+                                        reply_markup=totals_keyboard())
         return
     await update.message.reply_text("Чтобы собрать книгу, напишите /new")
 

@@ -98,5 +98,29 @@ def get_theme(name):
 
 
 def theme_word(theme):
-    """Holiday names stay capitalised in running text ("Christmas puzzles"), others don't ("space puzzles")."""
+    """Holiday names stay capitalised in running text ("Christmas puzzles"), others don't ("space puzzles").
+    A theme the author typed is used as typed."""
+    if theme.get("word"):
+        return theme["word"]
     return theme["name"] if theme.get("holiday") else theme["name"].lower()
+
+
+def custom_theme(base, name, words=None):
+    """A theme the author typed (e.g. "Dinosaurs"), drawn in the style of a built-in theme.
+
+    Pictures, fonts and cover colours come from the base theme; the name goes into the title, the cover and
+    the KDP texts; words (if given) replace the word search list.
+    """
+    theme = dict(base)
+    word = " ".join(name.split()) or base["name"]
+    low = word.lower()
+    theme.update(name=" ".join(w[:1].upper() + w[1:] for w in word.split()), word=word, holiday=False,
+                 keywords=[f"{low} activity book for kids ages 6-8", ("maze", f"{low} mazes for kids"),
+                           ("wordsearch", f"{low} word search for kids"), ("dots", f"{low} dot to dot for kids"),
+                           ("hidden", f"{low} seek and find book"), f"{low} puzzle book for kids",
+                           "activity book for kids ages 6-8", "puzzle books for kids 6-8",
+                           "screen free gifts for boys and girls"],
+                 categories=[], gift="a fun screen-free gift for birthdays, holidays and road trips")
+    if words:
+        theme["words"] = list(words)
+    return theme
