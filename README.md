@@ -1,0 +1,56 @@
+# KDP Puzzle Bot
+
+Генератор детских книг-головоломок (6–8 лет) для Amazon KDP Paperback, бренд Invisible KID.
+Telegram-бот (@kid_01_bot) работает на вашем компьютере: спрашивает настройки кнопками и присылает
+готовый комплект для KDP: `interior.pdf`, `cover.pdf` и `listing.txt`. Установка и запуск: [INSTALL.md](INSTALL.md) (двойной клик по `start.bat`).
+
+## Что умеет
+
+- Головоломки: лабиринты, поиск слов (word search), «найди и посчитай» (seek and find), dot-to-dot.
+- Лабиринты: квадратная, шестиугольная (соты) или круглая сетка; форма фигуры из темы (сердце, звезда,
+  ёлка, тыква, ракета...); стены прямые, скруглённые, волнистые или двойные. Каждый следующий лабиринт
+  в книге выглядит иначе (`puzzlebook/puzzles/maze.py`, формы в `puzzlebook/shapes.py`).
+- Dot-to-dot: 20–45 точек, 20 картинок с прорисованными глазами, ртом, пятнами
+  (`puzzlebook/figures.py`, туда же добавляются новые картинки).
+- Сложность: `progressive` (от лёгких к сложным, по умолчанию), `easy`, `medium`, `hard`.
+- Темы: `christmas`, `halloween`, `space`, `animals` (файл `puzzlebook/themes.py`).
+- Книга: титул, «This book belongs to» + copyright, страница с инструкцией, головоломки,
+  сертификат, ответы в конце. Страниц всегда чётное число и не меньше 24 (требование KDP).
+- Формат: 8.5×11", ч/б, без bleed, 300 DPI, поля по требованиям KDP.
+- Обложка `cover.pdf`: цветной разворот (задняя сторона, корешок, лицевая) с вылетами 0.125".
+  Ширина корешка считается по числу страниц (белая бумага: 0.002252" на страницу), надпись на корешке
+  появляется, когда он достаточно толстый. Сзади оставлено место под штрихкод KDP
+  (`puzzlebook/cover.py`, цвета тем в `puzzlebook/themes.py`).
+- `listing.txt`: название, подзаголовок, описание с HTML-тегами KDP, 7 ключевых слов, категории и
+  настройки печати, по порядку страниц KDP (`puzzlebook/listing.py`).
+
+## Запуск из командной строки
+
+```
+pip install -r requirements.txt
+python make_book.py --theme christmas --maze 10 --wordsearch 10 --hidden 6 --dots 6 --preview 1,4,20
+```
+
+Готовые `interior.pdf`, `cover.pdf`, `listing.txt` и картинки-превью появятся в папке `output`. Одинаковые настройки и
+одинаковый `--seed` дают одну и ту же книгу; другой `--seed` даёт новые головоломки.
+
+## Структура
+
+- `bot.py`: Telegram-бот (диалог, сборка в фоне, отправка превью и PDF). Настройки в `.env`.
+- `start.bat`: запуск на Windows; при первом запуске сам ставит зависимости.
+- `puzzlebook/lib.py`: холст и запись PDF (только Pillow).
+- `puzzlebook/icons.py`: контурные иконки, которые ребёнок может раскрасить.
+- `puzzlebook/puzzles/`: по файлу на каждый тип головоломки (страница + ответ).
+- `puzzlebook/book.py`: сборка всей книги.
+- `puzzlebook/style.py`: оформление страниц в стиле книги MAZES (рамка, тематические уголки, пейзаж внизу
+  с номером страницы, искорки на свободном месте, крупные контурные заголовки).
+- `fonts/`: у каждой темы свои шрифты (Хэллоуин: Creepster + Griffy, Рождество: Mountains of Christmas +
+  Berkshire Swash, Космос: Audiowide + Electrolize, Животные: Luckiest Guy + Sniglet), плюс Andika и Fredoka. Для тем нейросети есть ещё
+  Bangers, Chewy, Henny Penny, Pirata One, Rye, Bungee, Titan One, Cherry Bomb One и Patrick Hand.
+  Лицензии SIL Open Font License, у Luckiest Guy и Mountains of Christmas Apache 2.0. Все можно использовать в коммерческих книгах, лицензии лежат рядом.
+- `puzzlebook/ai.py`, `puzzlebook/aitheme.py`: своя тема через нейросеть Cloudflare Workers AI (тексты Llama 3.3,
+  картинки FLUX.1 schnell); `puzzlebook/raster.py` чистит картинки и делает из них формы лабиринтов и контуры
+  «точка к точке». Готовые темы лежат в папке `themes` (в git не попадает).
+- `assets/logo/`: логотипы Invisible KID. Горизонтальный стоит на титульном листе, на сертификате и на
+  обложке (на белой плашке), компактный на странице «This book belongs to», значок K рядом с номером
+  каждой страницы и внизу корешка. Чтобы заменить логотип, положите PNG с прозрачным фоном под тем же именем.

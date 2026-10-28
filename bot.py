@@ -1,0 +1,579 @@
+"""Telegram bot: asks for the book settings with buttons and sends back interior.pdf, cover.pdf and listing.txt.
+
+Runs on your computer (long polling, no server). Settings live in the .env file next to this one.
+"""
+import asyncio
+import json
+import logging
+import os
+import random
+import re
+import time
+from logging.handlers import RotatingFileHandler
+
+import httpx
+from dotenv import load_dotenv
+from telegram import (BotCommand, InlineKeyboardButton as Btn, InlineKeyboardMarkup, InputMediaPhoto, MenuButtonCommands,
+                      Update)
+from telegram.constants import ParseMode
+from telegram.error import NetworkError
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.request import HTTPXRequest
+
+from puzzlebook import ai, aitheme
+from puzzlebook.book import ORDER, Book, BookSpec
+from puzzlebook.cover import Cover
+from puzzlebook.listing import make_listing
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(HERE, ".env"))
+
+os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[RotatingFileHandler(os.path.join(HERE, "logs", "bot.log"), maxBytes=2_000_000, backupCount=3,
+                                  encoding="utf-8"), logging.StreamHandler()])
+logging.getLogger("httpx").setLevel(logging.WARNING)
+log = logging.getLogger("bot")
+
+BOOKS_DIR = os.path.join(HERE, "books")
+THEMES_DIR = os.path.join(HERE, "themes")             # themes made by the neural network, reused later
+
+THEMES = {"christmas": "🎄 Рождество", "halloween": "🎃 Хэллоуин", "space": "🚀 Космос", "animals": "🐾 Животные"}
+KINDS = {"maze": "🌀 Лабиринты", "wordsearch": "🔤 Поиск слов", "hidden": "🔍 Найди и посчитай", "dots": "✏️ Точка к точке"}
+TOTALS = [20, 30, 40, 50, 60]
+LEVELS = {"progressive": "📈 Нарастает (советую)", "easy": "🙂 Лёгкая", "medium": "😐 Средняя", "hard": "🤯 Сложная"}
+
+THEME_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9 '&-]{1,29}$")   # English: the book is for the US Amazon
+build_lock = asyncio.Lock()          # one book at a time: building uses the whole processor
+
+
+def admin_ids():
+    raw = os.getenv("ADMIN_IDS", "")
+    return {int(x) for x in raw.replace(" ", "").split(",") if x.strip().lstrip("-").isdigit()}
+
+
+async def allowed(update: Update) -> bool:
+    uid = update.effective_user.id if update.effective_user else None
+    if uid in admin_ids():
+        return True
+    text = (f"Ваш Telegram ID: <code>{uid}</code>\n\n"
+            "Бот пока не знает, что это вы. Откройте файл <b>.env</b> в папке бота, впишите строку\n"
+            f"<code>ADMIN_IDS={uid}</code>\nсохраните файл и перезапустите бота (закройте окно и снова откройте start.bat).")
+    if update.callback_query:
+        await update.callback_query.answer("Нет доступа", show_alert=True)
+    elif update.effective_message:
+        await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+    log.info("refused user %s", uid)
+    return False
+
+
+# ----------------------------------------------------------------- dialogue
+def draft(context):
+    return context.user_data.setdefault("draft", {"theme": None, "kinds": list(ORDER), "total": 30,
+                                                  "difficulty": "progressive"})
+
+
+def split_counts(kinds, total):
+    base, extra = divmod(total, len(kinds))
+    return {k: base + (1 if i < extra else 0) for i, k in enumerate(kinds)}
+
+
+def kb(rows):
+    return InlineKeyboardMarkup([[Btn(text, callback_data=data) for text, data in row] for row in rows])
+
+
+def theme_keyboard(prefix="theme", custom=True):
+    items = list(THEMES.items())
+    rows = [[(items[i][1], f"{prefix}:{items[i][0]}"), (items[i + 1][1], f"{prefix}:{items[i + 1][0]}")]
+            for i in range(0, len(items), 2)]
+    if custom:
+        rows.append([("✏️ Своя тема", "theme_custom")])
+    return kb(rows)
+
+
+def theme_label(d):
+    if d.get("theme_pack"):
+        return f"🎨 {d['theme_name']} (нейросеть)"
+    if d.get("theme_name"):
+        return f"✏️ {d['theme_name']} (оформление {THEMES[d['theme']]})"
+    return THEMES[d["theme"]]
+
+
+def theme_slug(d):
+    return re.sub(r"[^a-z0-9]+", "-", d["theme_name"].lower()).strip("-") if d.get("theme_name") else d["theme"]
+
+
+def parse_words(text):
+    """Word search words from free text: English letters only, 3-12 letters, no repeats."""
+    words, bad = [], []
+    for w in re.split(r"[\s,;.]+", text.upper()):
+        if not w:
+            continue
+        if re.fullmatch(r"[A-Z]{3,12}", w):
+            if w not in words:
+                words.append(w)
+        else:
+            bad.append(w)
+    return words, bad
+
+
+def kinds_keyboard(d):
+    rows = [[(("✅ " if k in d["kinds"] else "⬜ ") + label, f"kind:{k}")] for k, label in KINDS.items()]
+    rows.append([("Дальше ➡️", "kinds_done")])
+    return kb(rows)
+
+
+def totals_keyboard():
+    return kb([[(str(n), f"total:{n}") for n in TOTALS]])
+
+
+def levels_keyboard():
+    return kb([[(label, f"level:{k}")] for k, label in LEVELS.items()])
+
+
+def summary(d):
+    counts = split_counts(d["kinds"], d["total"])
+    lines = [f"Тема: <b>{theme_label(d)}</b>", f"Сложность: <b>{LEVELS[d['difficulty']]}</b>", ""]
+    if d.get("words") and "wordsearch" in d["kinds"]:
+        lines.insert(1, f"Слова для Word Search: {len(d['words'])} ваших")
+    lines += [f"{KINDS[k]}: {n}" for k, n in counts.items()]
+    pages = len(Book(spec_from(d, 0)).pages)
+    lines += ["", f"Получится примерно <b>{pages} страниц</b> (с ответами и служебными страницами)."]
+    return "\n".join(lines)
+
+
+def spec_from(d, seed):
+    return BookSpec(theme=d["theme"] or "animals", counts=split_counts(d["kinds"], d["total"]),
+                    difficulty=d["difficulty"], seed=seed, theme_name=d.get("theme_name", ""), words=d.get("words"),
+                    theme_pack=d.get("theme_pack", ""))
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await allowed(update):
+        return
+    await update.message.reply_text(
+        "Привет! Я собираю книги-головоломки для Amazon KDP.\n\n"
+        "/new — новая книга\n/help — подсказка\nЭти же команды есть под кнопкой «Меню» слева от поля ввода.\n\n"
+        "Бот присылает три файла для KDP: interior.pdf (страницы книги, 8.5×11\", ч/б), cover.pdf (цветная обложка "
+        "с корешком) и listing.txt (название, описание, ключевые слова). Копия сохраняется в папку books на компьютере.")
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await allowed(update):
+        return
+    await update.message.reply_text(
+        "Как пользоваться:\n1. Напишите /new\n2. Выберите тему, виды головоломок, количество и сложность\n"
+        "   Своя тема: кнопка «✏️ Своя тема», напишите её по-английски, выберите похожее оформление и, если "
+        "хотите, пришлите свои слова для Word Search.\n"
+        "3. Нажмите «Собрать» и подождите 1–2 минуты\n4. Не понравилось — «Другой вариант»: те же настройки, "
+        "новые головоломки.\n\nЕсли что-то сломалось, пришлите Claude файл logs/bot.log из папки бота.")
+
+
+async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await allowed(update):
+        return
+    context.user_data.pop("draft", None)
+    context.user_data.pop("waiting", None)
+    await update.effective_message.reply_text("Выберите тему книги или напишите свою:", reply_markup=theme_keyboard())
+
+
+async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await allowed(update):
+        return
+    q = update.callback_query
+    data = q.data
+    d = draft(context)
+    if data.startswith("theme:") or data.startswith("style:"):
+        context.user_data.pop("waiting", None)
+        d.pop("theme_pack", None)
+        if data.startswith("theme:"):
+            d.pop("theme_name", None)
+            d.pop("words", None)
+        d["theme"] = data.split(":", 1)[1]
+        await q.answer()
+        await q.edit_message_text(f"Тема: {theme_label(d)}\n\nКакие головоломки положить в книгу?",
+                                  reply_markup=kinds_keyboard(d))
+    elif data == "theme_custom":
+        context.user_data["waiting"] = "theme_name"
+        await q.answer()
+        if ai.configured():
+            await q.edit_message_text(
+                "✏️ Напишите тему книги, можно по-русски. Например: <i>динозавры</i>, <i>подводный мир</i>, "
+                "<i>пасха</i>, <i>пираты</i>.\n\nНейросеть придумает английское название, слова и сюжеты и нарисует "
+                "картинки. Это займёт 1–2 минуты.", parse_mode=ParseMode.HTML)
+        else:
+            await q.edit_message_text(
+                "✏️ Напишите тему книги <b>по-английски</b>, 1–3 слова. Например: <code>Dinosaurs</code>, "
+                "<code>Ocean Animals</code>, <code>Easter</code>.\n\nКнига для американского Amazon, поэтому тема "
+                "попадёт в название, на обложку и в описание на английском.\n\n<i>Нейросеть пока не подключена "
+                "(нет ключа Cloudflare в .env), поэтому картинки возьму из одного из готовых оформлений.</i>",
+                parse_mode=ParseMode.HTML)
+    elif data == "regen":
+        typed = d.get("typed")
+        await q.answer()
+        if not typed:
+            await q.message.reply_text("Не помню тему. Начните с /new")
+            return
+        await make_ai_theme(update, context, typed, fresh=True)
+    elif data == "fix":
+        await q.answer()
+        if not d.get("theme_pack") or not d.get("typed"):
+            await q.message.reply_text("Не помню тему. Начните с /new")
+            return
+        context.user_data["waiting"] = "fix"
+        folder = d["theme_pack"]
+        sheet = aitheme.preview_sheet(folder, aitheme.load(folder))     # older sheets had no numbers
+        with open(sheet, "rb") as f:
+            await q.message.reply_photo(
+                f, parse_mode=ParseMode.HTML, caption=(
+                    "✏️ Напишите, что исправить в картинках. Номер стоит в углу каждой картинки. Например:\n"
+                    "<i>2, 3 и 10 не про вертолёты, замени на вертолёты разных видов. Людей не рисуй.</i>\n\n"
+                    "Нейросеть перерисует только то, о чём вы написали, остальные картинки останутся. "
+                    "Пожелания она запомнит и учтёт, если потом нарисовать тему заново."))
+    elif data == "words_skip":
+        context.user_data.pop("waiting", None)
+        d.pop("words", None)
+        await q.answer()
+        await q.edit_message_text("Сколько всего головоломок в книге?", reply_markup=totals_keyboard())
+    elif data.startswith("kind:"):
+        k = data.split(":", 1)[1]
+        d["kinds"] = [x for x in ORDER if (x in d["kinds"]) != (x == k)]
+        await q.answer()
+        await q.edit_message_reply_markup(reply_markup=kinds_keyboard(d))
+    elif data == "kinds_done":
+        if not d["kinds"]:
+            await q.answer("Выберите хотя бы один вид", show_alert=True)
+            return
+        await q.answer()
+        if d.get("theme_pack") and "wordsearch" in d["kinds"]:
+            context.user_data["waiting"] = "words"
+            words = aitheme.load(d["theme_pack"])["words"]
+            await q.edit_message_text(
+                f"🔤 Слова для Word Search придумала нейросеть:\n<code>{', '.join(words).lower()}</code>\n\n"
+                "Оставить их или прислать свои? Свои: по-английски, через запятую, от 8 до 40 слов.",
+                parse_mode=ParseMode.HTML, reply_markup=kb([[("✅ Оставить эти", "words_skip")]]))
+            return
+        if d.get("theme_name") and "wordsearch" in d["kinds"]:
+            context.user_data["waiting"] = "words"
+            await q.edit_message_text(
+                f"🔤 Пришлите слова для Word Search на тему «{d['theme_name']}»: <b>по-английски</b>, через запятую "
+                "или пробел, от 8 до 40 слов, в каждом от 3 до 12 букв. Например:\n"
+                "<code>dino, fossil, bone, egg, roar, claw, tail, volcano</code>\n\n"
+                f"Или нажмите «Пропустить», тогда возьму слова из оформления {THEMES[d['theme']]}.",
+                parse_mode=ParseMode.HTML, reply_markup=kb([[("⏭ Пропустить", "words_skip")]]))
+            return
+        await q.edit_message_text("Сколько всего головоломок в книге?", reply_markup=totals_keyboard())
+    elif data.startswith("total:"):
+        d["total"] = int(data.split(":", 1)[1])
+        await q.answer()
+        await q.edit_message_text("Сложность:", reply_markup=levels_keyboard())
+    elif data.startswith("level:"):
+        d["difficulty"] = data.split(":", 1)[1]
+        await q.answer()
+        await q.edit_message_text(summary(d), parse_mode=ParseMode.HTML,
+                                  reply_markup=kb([[("🚀 Собрать", "build")], [("↩️ Начать заново", "new")]]))
+    elif data == "build":
+        await q.answer()
+        await q.edit_message_reply_markup(reply_markup=None)
+        await build_and_send(update, context, d, random.randint(1, 99999))
+    elif data == "again":
+        last = context.user_data.get("last")
+        await q.answer()
+        if not last:
+            await q.message.reply_text("Не помню прошлые настройки. Начните с /new")
+            return
+        await build_and_send(update, context, last, random.randint(1, 99999))
+    elif data == "new":
+        await q.answer()
+        await cmd_new(update, context)
+    else:
+        await q.answer()
+
+
+# ------------------------------------------------------------------- build
+async def build_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, d, seed):
+    chat = update.effective_chat
+    if build_lock.locked():
+        await chat.send_message("⏳ Уже собираю другую книгу, эта встанет в очередь.")
+    async with build_lock:
+        status = await chat.send_message("⚙️ Собираю книгу… 0%")
+        loop = asyncio.get_running_loop()
+        shown = {"pct": 0, "t": 0.0}
+
+        def progress(n, total, _elapsed):
+            pct = int(n * 100 / total)
+            if pct - shown["pct"] >= 10 and time.time() - shown["t"] > 2:
+                shown.update(pct=pct, t=time.time())
+                asyncio.run_coroutine_threadsafe(status.edit_text(f"⚙️ Собираю книгу… {pct}%"), loop)
+
+        spec = spec_from(d, seed)
+        out_dir = os.path.join(BOOKS_DIR, time.strftime("%Y-%m-%d_%H-%M") + f"_{theme_slug(d)}_{seed}")
+        t0 = time.time()
+        try:
+            book, files, previews = await asyncio.to_thread(render, spec, out_dir, progress)
+        except Exception:
+            log.exception("build failed: %s", spec)
+            await status.edit_text("😕 Не получилось собрать книгу. Подробности записаны в logs/bot.log — "
+                                   "пришлите этот файл Claude.")
+            return
+        log.info("built %s in %.0fs: %s", out_dir, time.time() - t0, book.summary())
+        context.user_data["last"] = dict(d)
+        await status.edit_text(f"✅ Готово за {time.time() - t0:.0f} с. Отправляю…")
+        media = []
+        for p in previews[:10]:
+            with open(p, "rb") as f:
+                media.append(InputMediaPhoto(f.read()))
+        if media:
+            await chat.send_media_group(media)
+        margins = book.margin_report()
+        captions = {
+            "interior": (f"📘 <b>{book.title}</b>\n{len(book.pages)} страниц, тема {theme_label(d)}, "
+                         f"номер варианта {seed}\nПоля: {margins['gutter']:.2f}\" у корешка (KDP просит ≥ 0.375\")"),
+            "cover": (f"🎨 Обложка для KDP: задняя сторона, корешок {files['spine']:.3f}\" и лицевая, "
+                      f"с вылетами 0.125\". Белый прямоугольник сзади оставлен под штрихкод KDP."),
+            "listing": ("📝 Тексты для страницы книги на KDP: название, описание, 7 ключевых слов, категории "
+                        f"и настройки печати.\nКопия всех файлов на компьютере: books/{os.path.basename(out_dir)}"),
+        }
+        for key in ("interior", "cover", "listing"):
+            path = files[key]
+            ext = os.path.splitext(path)[1]
+            last = key == "listing"
+            with open(path, "rb") as f:
+                await chat.send_document(f, filename=f"{theme_slug(d)}-{seed}-{key}{ext}", caption=captions[key],
+                                         parse_mode=ParseMode.HTML,
+                                         reply_markup=kb([[("🔄 Другой вариант", "again"), ("🆕 Новая книга", "new")]])
+                                         if last else None)
+        await status.delete()
+
+
+def render(spec, out_dir, progress):
+    """interior.pdf, cover.pdf and listing.txt in out_dir; previews start with the cover."""
+    book = Book(spec)
+    # previews: the first page of every puzzle section (the cover preview replaces the title page)
+    pages = {first for first, _ in (book.sections[k] for k in book.kinds)}
+    pdf, previews = book.render(out_dir, pages, progress)
+    cover = Cover(book)
+    cover_pdf, cover_preview = cover.render(out_dir)
+    listing = os.path.join(out_dir, "listing.txt")
+    with open(listing, "w", encoding="utf-8") as f:
+        f.write(make_listing(book))
+    files = {"interior": pdf, "cover": cover_pdf, "listing": listing, "spine": cover.spine / 72}
+    return book, files, [cover_preview] + previews
+
+
+async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await allowed(update):
+        return
+    waiting = context.user_data.get("waiting")
+    text = update.message.text.strip()
+    d = draft(context)
+    if waiting == "theme_name" and ai.configured():
+        typed = " ".join(text.split())
+        if not 2 <= len(typed) <= 60:
+            await update.message.reply_text("Напишите тему коротко, от 2 до 60 букв.")
+            return
+        context.user_data.pop("waiting", None)
+        await make_ai_theme(update, context, typed)
+        return
+    if waiting == "theme_building":
+        await update.message.reply_text("⏳ Нейросеть ещё готовит тему, подождите немного.")
+        return
+    if waiting == "fix" and d.get("theme_pack"):
+        if len(text) < 3:
+            await update.message.reply_text("Напишите подробнее, что исправить.")
+            return
+        context.user_data.pop("waiting", None)
+        await make_ai_theme(update, context, d["typed"], fix=text[:1000])
+        return
+    if waiting == "theme_name":
+        name = " ".join(text.split())
+        if not THEME_NAME.match(name) or len(name.split()) > 3:
+            await update.message.reply_text(
+                "Нужно 1–3 английских слова, только латинские буквы, например <code>Dinosaurs</code>. "
+                "Попробуйте ещё раз.", parse_mode=ParseMode.HTML)
+            return
+        context.user_data.pop("waiting", None)
+        d["theme_name"] = name
+        d.pop("words", None)
+        await update.message.reply_text(
+            f"Тема: <b>{name}</b>\n\nКакое оформление ближе? От него возьму картинки, шрифты, уголки страниц "
+            "и цвета обложки.", parse_mode=ParseMode.HTML, reply_markup=theme_keyboard("style", custom=False))
+        return
+    if waiting == "words":
+        words, bad = parse_words(text)
+        if len(words) < 8:
+            note = f"\nНе подошли: {', '.join(bad[:10])}" if bad else ""
+            await update.message.reply_text(
+                f"Подходящих слов: {len(words)}, а нужно хотя бы 8 (английские буквы, 3–12 в слове). "
+                f"Пришлите список ещё раз.{note}", reply_markup=kb([[("⏭ Пропустить", "words_skip")]]))
+            return
+        context.user_data.pop("waiting", None)
+        d["words"] = words[:40]
+        note = f"\nПропустил: {', '.join(bad[:10])}" if bad else ""
+        await update.message.reply_text(f"Слова приняты: {len(d['words'])}.{note}\n\nСколько всего головоломок в книге?",
+                                        reply_markup=totals_keyboard())
+        return
+    await update.message.reply_text("Чтобы собрать книгу, напишите /new")
+
+
+def cached_theme(typed):
+    """The folder of a theme already made for the same words, if there is one."""
+    path = os.path.join(THEMES_DIR, "index.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            folder = json.load(f).get(typed.lower())
+    except (OSError, ValueError):
+        return None
+    return folder if folder and os.path.exists(os.path.join(folder, "theme.json")) else None
+
+
+def remember_theme(typed, folder):
+    path = os.path.join(THEMES_DIR, "index.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            index = json.load(f)
+    except (OSError, ValueError):
+        index = {}
+    index[typed.lower()] = folder
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(index, f, ensure_ascii=False, indent=1)
+
+
+async def make_ai_theme(update: Update, context: ContextTypes.DEFAULT_TYPE, typed, fresh=False, fix=None):
+    """Asks the neural network for the whole theme, shows its pictures and goes on to the puzzle types.
+    fresh: draw it anew (keeping the author's wishes); fix: the author's words about what to redraw."""
+    chat = update.effective_chat
+    d = draft(context)
+    current = d.get("theme_pack")
+    folder = None if fresh or fix else cached_theme(typed)
+    if folder:
+        theme = aitheme.load(folder)
+        note = "Эту тему нейросеть уже готовила, беру готовую."
+    else:
+        context.user_data["waiting"] = "theme_building"
+        status = await chat.send_message("✏️ Нейросеть исправляет картинки…" if fix else
+                                         f"🎨 Нейросеть готовит тему «{typed}»…")
+        loop = asyncio.get_running_loop()
+        shown = {"t": 0.0}
+
+        def progress(text):
+            if time.time() - shown["t"] > 2:
+                shown["t"] = time.time()
+                asyncio.run_coroutine_threadsafe(status.edit_text(text), loop)
+
+        os.makedirs(THEMES_DIR, exist_ok=True)
+        try:
+            if fix:
+                theme, folder, redrawn, failed = await asyncio.to_thread(
+                    aitheme.revise, current, fix, THEMES_DIR, progress)
+            else:
+                wishes = aitheme.wishes(current) if fresh and current else []
+                theme, folder = await asyncio.to_thread(aitheme.build, typed, THEMES_DIR, progress, None, wishes)
+        except ai.AIError as e:
+            context.user_data.pop("waiting", None)
+            log.warning("theme %r failed: %s", typed, e)
+            await status.edit_text(f"😕 {e}")
+            if fix:
+                context.user_data["waiting"] = "fix"
+                await chat.send_message("Можно написать правки ещё раз, другими словами.")
+                return
+            name = " ".join(typed.split())
+            if THEME_NAME.match(name) and len(name.split()) <= 3:
+                d["theme_name"] = name
+                await chat.send_message("Можно пока выбрать похожее оформление из готовых:",
+                                        reply_markup=theme_keyboard("style", custom=False))
+            return
+        except Exception:
+            context.user_data.pop("waiting", None)
+            log.exception("theme %r failed", typed)
+            await status.edit_text("😕 Не получилось подготовить тему. Подробности в logs/bot.log.")
+            return
+        context.user_data.pop("waiting", None)
+        remember_theme(typed, folder)
+        await status.delete()
+        note = "Тема готова."
+        if fix:
+            note = (f"Перерисовал картинки: {', '.join(map(str, redrawn))}." if redrawn else
+                    "Перерисовать не получилось, картинки остались прежними.")
+            if redrawn and failed:
+                note += f" Не получились: {', '.join(map(str, failed))}, они остались прежними."
+    d.update(theme="animals", theme_pack=folder, theme_name=theme["name"], typed=typed)
+    d.pop("words", None)
+    with open(os.path.join(folder, "preview.png"), "rb") as f:
+        await chat.send_photo(f, caption=f"🎨 {note} Название книги: <b>{theme['name']} Puzzle Fun!</b>\n"
+                                         "Если что-то не нравится, напишите нейросети, что исправить, "
+                                         "или нарисуйте тему заново.",
+                              parse_mode=ParseMode.HTML,
+                              reply_markup=kb([[("✏️ Исправить картинки", "fix")], [("🔁 Нарисовать заново", "regen")]]))
+    await chat.send_message(f"Тема: {theme_label(d)}\n\nКакие головоломки положить в книгу?",
+                            reply_markup=kinds_keyboard(d))
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    log.error("unhandled error", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_chat:
+        try:
+            await update.effective_chat.send_message("😕 Что-то пошло не так. Подробности в logs/bot.log.")
+        except Exception:
+            pass
+
+
+class PatientRequest(HTTPXRequest):
+    """Waits longer for Telegram and retries when the connection itself could not be opened.
+
+    On some networks the first connection to api.telegram.org takes several seconds. Retrying is safe
+    only for connect errors: then the request never reached Telegram, so nothing gets sent twice.
+    """
+
+    async def do_request(self, *args, **kwargs):
+        for attempt in range(4):
+            try:
+                return await super().do_request(*args, **kwargs)
+            except NetworkError as e:
+                if attempt == 3 or not isinstance(e.__cause__, (httpx.ConnectTimeout, httpx.ConnectError)):
+                    raise
+                log.warning("no connection to Telegram, retry %d: %r", attempt + 1, e.__cause__)
+                await asyncio.sleep(2 * (attempt + 1))
+
+
+MENU = [BotCommand("new", "📚 Новая книга"),
+        BotCommand("help", "❓ Как пользоваться"),
+        BotCommand("start", "🏠 Начало")]
+
+
+async def setup_menu(app):
+    """The "Menu" button left of the input field, as in the IQRacer bot: Telegram lists these commands."""
+    try:
+        await app.bot.set_my_commands(MENU)
+        await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except NetworkError as e:
+        log.warning("could not set the menu button: %r", e)
+
+
+def main():
+    token = os.getenv("BOT_TOKEN", "").strip()
+    if not token or token.startswith("вставьте"):
+        print("\nНе найден токен бота. Откройте файл .env в Блокноте и вставьте токен от @BotFather после BOT_TOKEN=\n")
+        return
+    timeouts = dict(connect_timeout=20, read_timeout=30, write_timeout=60, media_write_timeout=180, pool_timeout=20)
+    app = (Application.builder().token(token)
+           .request(PatientRequest(connection_pool_size=8, **timeouts))
+           .get_updates_request(PatientRequest(**timeouts))
+           .post_init(setup_menu)
+           .build())
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("new", cmd_new))
+    app.add_handler(CallbackQueryHandler(on_button))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_error_handler(on_error)
+    print("\nБот запущен. Откройте его в Telegram и напишите /new\nНе закрывайте это окно, пока пользуетесь ботом.\n")
+    log.info("bot started, admins: %s", admin_ids() or "none yet")
+    # Python 3.14 no longer creates an event loop on demand, so give run_polling one to use
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
