@@ -7,7 +7,11 @@ Examples:
 """
 import argparse
 
+import os
+
 from puzzlebook.book import Book, BookSpec, ORDER
+from puzzlebook.cover import Cover
+from puzzlebook.listing import make_listing
 from puzzlebook.themes import THEMES
 
 
@@ -32,7 +36,13 @@ def main():
     preview = {int(p) for p in args.preview.split(",") if p.strip()}
     pdf, previews = book.render(args.out, preview,
                                 progress=lambda n, total, t: print(f"page {n}/{total}  {t:.0f}s", flush=True))
-    print("wrote", pdf, *previews)
+    cover = Cover(book)
+    cover_pdf, cover_preview = cover.render(args.out)
+    listing = os.path.join(args.out, "listing.txt")
+    with open(listing, "w", encoding="utf-8") as f:
+        f.write(make_listing(book))
+    print("wrote", pdf, cover_pdf, listing, cover_preview, *previews)
+    print(f"cover {cover.W / 72:.3f} x {cover.H / 72:.3f} in, spine {cover.spine / 72:.3f} in")
     print("closest ink (in):", {k: round(v, 2) for k, v in book.margin_report().items()})
 
 

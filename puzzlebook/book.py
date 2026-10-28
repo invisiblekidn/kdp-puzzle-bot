@@ -138,7 +138,7 @@ class Book:
         how = {"maze": "find the way from START to FINISH.",
                "wordsearch": "find and circle the hidden words.",
                "hidden": "find the pictures, count them and write the number.",
-               "dots": "join the numbers in order to reveal a picture, then colour it in."}
+               "dots": "join the numbers in order to reveal a picture, then color it in."}
         items = []
         for kind in self.kinds:
             a, b = self.sections[kind]
@@ -184,7 +184,7 @@ class Book:
 
     def doodle_page(self, C, n):
         x0, x1 = frame(n)
-        top = header(C, n, "Doodle Time!", "Draw your favourite picture from this book.")
+        top = header(C, n, "Doodle Time!", "Draw your favorite picture from this book.")
         C.stroke([(x0, top - 10), (x1, top - 10), (x1, BOTTOM), (x0, BOTTOM)], 2.4, dash=(12, 9), closed=True)
 
     # -------------------------------------------------------------- output

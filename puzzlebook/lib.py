@@ -112,28 +112,38 @@ def heart_pts(width, n=120, cx=0.0, cy=0.0):
 
 # ------------------------------------------------------------------ canvas
 class Canvas:
-    def __init__(self):
-        self.im = Image.new("L", (round(PW * S), round(PH * S)), 255)
+    """Page canvas (w x h points). mode "RGB" is for the colour cover; gray values then map to gray RGB
+    unless listed in self.colors (the cover uses that to colour icons that are drawn with white fill)."""
+
+    def __init__(self, w=PW, h=PH, mode="L", bg=255):
+        self.w, self.h, self.mode = w, h, mode
+        self.colors = {}
+        self.im = Image.new(mode, (round(w * S), round(h * S)), self.ink(bg))
         self.d = ImageDraw.Draw(self.im)
 
+    def ink(self, v):
+        if self.mode == "L" or not isinstance(v, int):
+            return v
+        return self.colors.get(v, (v, v, v))
+
     def _p(self, x, y):
-        return (x * S, (PH - y) * S)
+        return (x * S, (self.h - y) * S)
 
     def poly(self, pts, fill=255):
-        self.d.polygon([self._p(*p) for p in pts], fill=fill)
+        self.d.polygon([self._p(*p) for p in pts], fill=self.ink(fill))
 
     def rect(self, x0, y0, x1, y1, fill=0):
         a, b = self._p(min(x0, x1), max(y0, y1)), self._p(max(x0, x1), min(y0, y1))
-        self.d.rectangle([a, b], fill=fill)
+        self.d.rectangle([a, b], fill=self.ink(fill))
 
     def dot(self, x, y, r, fill=0):
         px, py = self._p(x, y)
-        self.d.ellipse([px - r * S, py - r * S, px + r * S, py + r * S], fill=fill)
+        self.d.ellipse([px - r * S, py - r * S, px + r * S, py + r * S], fill=self.ink(fill))
 
     def ring(self, x, y, r, w, gray=0):
         px, py = self._p(x, y)
         self.d.ellipse([px - r * S, py - r * S, px + r * S, py + r * S],
-                       outline=gray, width=max(1, round(w * S)))
+                       outline=self.ink(gray), width=max(1, round(w * S)))
 
     def stroke(self, pts, w, dash=None, closed=False, gray=0):
         """Round-capped stroke of width w (pt). dash=(visible_dash_len, gap) in pt."""
@@ -145,7 +155,7 @@ class Canvas:
         if dash:
             period = (dash[0] + dash[1]) * S
             on = max(0.0, dash[0] - w) * S
-        d = self.d
+        d, ink = self.d, self.ink(gray)
         t = 0.0
         for (x0, y0), (x1, y1) in zip(P, P[1:]):
             seg = math.hypot(x1 - x0, y1 - y0)
@@ -156,7 +166,7 @@ class Canvas:
                 if dash and ((t + seg * i / n) % period) > on:
                     continue
                 x, y = x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n
-                d.ellipse([x - r, y - r, x + r, y + r], fill=gray)
+                d.ellipse([x - r, y - r, x + r, y + r], fill=ink)
             t += seg
 
     def shape(self, pts, w, fill=255, gray=0, dash=None):
@@ -172,11 +182,13 @@ class Canvas:
                (x - size * ca - size * 0.55 * sa, y - size * sa + size * 0.55 * ca)]
         self.poly(pts, gray)
 
-    def text(self, x, y, s, name=REG, pt=14, anchor="ms", gray=0):
-        self.d.text(self._p(x, y), s, font=font(name, pt), fill=gray, anchor=anchor)
+    def text(self, x, y, s, name=REG, pt=14, anchor="ms", gray=0, outline=0, outline_gray=0):
+        """outline: width in pt of a border drawn around the letters (cover titles)."""
+        self.d.text(self._p(x, y), s, font=font(name, pt), fill=self.ink(gray), anchor=anchor,
+                    stroke_width=round(outline * S), stroke_fill=self.ink(outline_gray))
 
     def final_bytes(self):
-        return self.im.resize((OUT_W, OUT_H), Image.LANCZOS)
+        return self.im.resize((round(self.w * DPI / 72), round(self.h * DPI / 72)), Image.LANCZOS)
 
 
 # ------------------------------------------------------------------ PDF

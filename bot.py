@@ -1,4 +1,4 @@
-"""Telegram bot: asks for the book settings with buttons and sends back interior.pdf with previews.
+"""Telegram bot: asks for the book settings with buttons and sends back interior.pdf, cover.pdf and listing.txt.
 
 Runs on your computer (long polling, no server). Settings live in the .env file next to this one.
 """
@@ -18,6 +18,8 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from telegram.request import HTTPXRequest
 
 from puzzlebook.book import ORDER, Book, BookSpec
+from puzzlebook.cover import Cover
+from puzzlebook.listing import make_listing
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(HERE, ".env"))
@@ -114,7 +116,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Я собираю книги-головоломки для Amazon KDP.\n\n"
         "/new — новая книга\n/help — подсказка\n\n"
-        "Готовая книга приходит файлом interior.pdf (8.5×11\", ч/б), а копия сохраняется в папку books на компьютере.")
+        "Бот присылает три файла для KDP: interior.pdf (страницы книги, 8.5×11\", ч/б), cover.pdf (цветная обложка "
+        "с корешком) и listing.txt (название, описание, ключевые слова). Копия сохраняется в папку books на компьютере.")
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202,7 +205,7 @@ async def build_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, d, 
         out_dir = os.path.join(BOOKS_DIR, time.strftime("%Y-%m-%d_%H-%M") + f"_{d['theme']}_{seed}")
         t0 = time.time()
         try:
-            book, pdf, previews = await asyncio.to_thread(render, spec, out_dir, progress)
+            book, files, previews = await asyncio.to_thread(render, spec, out_dir, progress)
         except Exception:
             log.exception("build failed: %s", spec)
             await status.edit_text("😕 Не получилось собрать книгу. Подробности записаны в logs/bot.log — "
@@ -218,22 +221,39 @@ async def build_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, d, 
         if media:
             await chat.send_media_group(media)
         margins = book.margin_report()
-        caption = (f"📘 <b>{book.title}</b>\n{len(book.pages)} страниц, тема {THEMES[d['theme']]}, номер варианта {seed}\n"
-                   f"Поля: {margins['gutter']:.2f}\" у корешка (KDP просит ≥ 0.375\")\n"
-                   f"Копия на компьютере: books/{os.path.basename(out_dir)}")
-        with open(pdf, "rb") as f:
-            await chat.send_document(f, filename=f"{d['theme']}-{seed}-interior.pdf", caption=caption,
-                                     parse_mode=ParseMode.HTML,
-                                     reply_markup=kb([[("🔄 Другой вариант", "again"), ("🆕 Новая книга", "new")]]))
+        captions = {
+            "interior": (f"📘 <b>{book.title}</b>\n{len(book.pages)} страниц, тема {THEMES[d['theme']]}, "
+                         f"номер варианта {seed}\nПоля: {margins['gutter']:.2f}\" у корешка (KDP просит ≥ 0.375\")"),
+            "cover": (f"🎨 Обложка для KDP: задняя сторона, корешок {files['spine']:.3f}\" и лицевая, "
+                      f"с вылетами 0.125\". Белый прямоугольник сзади оставлен под штрихкод KDP."),
+            "listing": ("📝 Тексты для страницы книги на KDP: название, описание, 7 ключевых слов, категории "
+                        f"и настройки печати.\nКопия всех файлов на компьютере: books/{os.path.basename(out_dir)}"),
+        }
+        for key in ("interior", "cover", "listing"):
+            path = files[key]
+            ext = os.path.splitext(path)[1]
+            last = key == "listing"
+            with open(path, "rb") as f:
+                await chat.send_document(f, filename=f"{d['theme']}-{seed}-{key}{ext}", caption=captions[key],
+                                         parse_mode=ParseMode.HTML,
+                                         reply_markup=kb([[("🔄 Другой вариант", "again"), ("🆕 Новая книга", "new")]])
+                                         if last else None)
         await status.delete()
 
 
 def render(spec, out_dir, progress):
+    """interior.pdf, cover.pdf and listing.txt in out_dir; previews start with the cover."""
     book = Book(spec)
-    # previews: the title page and the first page of every puzzle section
-    pages = {1} | {first for first, _ in (book.sections[k] for k in book.kinds)}
+    # previews: the first page of every puzzle section (the cover preview replaces the title page)
+    pages = {first for first, _ in (book.sections[k] for k in book.kinds)}
     pdf, previews = book.render(out_dir, pages, progress)
-    return book, pdf, previews
+    cover = Cover(book)
+    cover_pdf, cover_preview = cover.render(out_dir)
+    listing = os.path.join(out_dir, "listing.txt")
+    with open(listing, "w", encoding="utf-8") as f:
+        f.write(make_listing(book))
+    files = {"interior": pdf, "cover": cover_pdf, "listing": listing, "spine": cover.spine / 72}
+    return book, files, [cover_preview] + previews
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):

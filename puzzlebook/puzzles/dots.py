@@ -188,7 +188,7 @@ class Dots:
     def page(self, C, n):
         x0, x1 = frame(n)
         top = header(C, n, f"Dot to Dot {self.number}",
-                     f"Join the dots from 1 to {self.count}, then join {self.count} back to 1. Colour your picture!")
+                     f"Join the dots from 1 to {self.count}, then join {self.count} back to 1. Color your picture!")
         dots, dense, paths = self._geometry(x0 + 30, BOTTOM + 20, x1 - 30, top - 20)
         self._details(C, paths, 2.2)
         labels = label_positions(dots, dense, [p for _, pts, _ in paths for p in pts[::2]])
