@@ -216,6 +216,21 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text("Не помню тему. Начните с /new")
             return
         await make_ai_theme(update, context, typed, fresh=True)
+    elif data == "fix":
+        await q.answer()
+        if not d.get("theme_pack") or not d.get("typed"):
+            await q.message.reply_text("Не помню тему. Начните с /new")
+            return
+        context.user_data["waiting"] = "fix"
+        folder = d["theme_pack"]
+        sheet = aitheme.preview_sheet(folder, aitheme.load(folder))     # older sheets had no numbers
+        with open(sheet, "rb") as f:
+            await q.message.reply_photo(
+                f, parse_mode=ParseMode.HTML, caption=(
+                    "✏️ Напишите, что исправить в картинках. Номер стоит в углу каждой картинки. Например:\n"
+                    "<i>2, 3 и 10 не про вертолёты, замени на вертолёты разных видов. Людей не рисуй.</i>\n\n"
+                    "Нейросеть перерисует только то, о чём вы написали, остальные картинки останутся. "
+                    "Пожелания она запомнит и учтёт, если потом нарисовать тему заново."))
     elif data == "words_skip":
         context.user_data.pop("waiting", None)
         d.pop("words", None)
@@ -364,6 +379,13 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if waiting == "theme_building":
         await update.message.reply_text("⏳ Нейросеть ещё готовит тему, подождите немного.")
         return
+    if waiting == "fix" and d.get("theme_pack"):
+        if len(text) < 3:
+            await update.message.reply_text("Напишите подробнее, что исправить.")
+            return
+        context.user_data.pop("waiting", None)
+        await make_ai_theme(update, context, d["typed"], fix=text[:1000])
+        return
     if waiting == "theme_name":
         name = " ".join(text.split())
         if not THEME_NAME.match(name) or len(name.split()) > 3:
@@ -418,17 +440,20 @@ def remember_theme(typed, folder):
         json.dump(index, f, ensure_ascii=False, indent=1)
 
 
-async def make_ai_theme(update: Update, context: ContextTypes.DEFAULT_TYPE, typed, fresh=False):
-    """Asks the neural network for the whole theme, shows its pictures and goes on to the puzzle types."""
+async def make_ai_theme(update: Update, context: ContextTypes.DEFAULT_TYPE, typed, fresh=False, fix=None):
+    """Asks the neural network for the whole theme, shows its pictures and goes on to the puzzle types.
+    fresh: draw it anew (keeping the author's wishes); fix: the author's words about what to redraw."""
     chat = update.effective_chat
     d = draft(context)
-    folder = None if fresh else cached_theme(typed)
+    current = d.get("theme_pack")
+    folder = None if fresh or fix else cached_theme(typed)
     if folder:
         theme = aitheme.load(folder)
         note = "Эту тему нейросеть уже готовила, беру готовую."
     else:
         context.user_data["waiting"] = "theme_building"
-        status = await chat.send_message(f"🎨 Нейросеть готовит тему «{typed}»…")
+        status = await chat.send_message("✏️ Нейросеть исправляет картинки…" if fix else
+                                         f"🎨 Нейросеть готовит тему «{typed}»…")
         loop = asyncio.get_running_loop()
         shown = {"t": 0.0}
 
@@ -439,11 +464,20 @@ async def make_ai_theme(update: Update, context: ContextTypes.DEFAULT_TYPE, type
 
         os.makedirs(THEMES_DIR, exist_ok=True)
         try:
-            theme, folder = await asyncio.to_thread(aitheme.build, typed, THEMES_DIR, progress)
+            if fix:
+                theme, folder, redrawn, failed = await asyncio.to_thread(
+                    aitheme.revise, current, fix, THEMES_DIR, progress)
+            else:
+                wishes = aitheme.wishes(current) if fresh and current else []
+                theme, folder = await asyncio.to_thread(aitheme.build, typed, THEMES_DIR, progress, None, wishes)
         except ai.AIError as e:
             context.user_data.pop("waiting", None)
             log.warning("theme %r failed: %s", typed, e)
             await status.edit_text(f"😕 {e}")
+            if fix:
+                context.user_data["waiting"] = "fix"
+                await chat.send_message("Можно написать правки ещё раз, другими словами.")
+                return
             name = " ".join(typed.split())
             if THEME_NAME.match(name) and len(name.split()) <= 3:
                 d["theme_name"] = name
@@ -459,12 +493,19 @@ async def make_ai_theme(update: Update, context: ContextTypes.DEFAULT_TYPE, type
         remember_theme(typed, folder)
         await status.delete()
         note = "Тема готова."
+        if fix:
+            note = (f"Перерисовал картинки: {', '.join(map(str, redrawn))}." if redrawn else
+                    "Перерисовать не получилось, картинки остались прежними.")
+            if redrawn and failed:
+                note += f" Не получились: {', '.join(map(str, failed))}, они остались прежними."
     d.update(theme="animals", theme_pack=folder, theme_name=theme["name"], typed=typed)
     d.pop("words", None)
     with open(os.path.join(folder, "preview.png"), "rb") as f:
         await chat.send_photo(f, caption=f"🎨 {note} Название книги: <b>{theme['name']} Puzzle Fun!</b>\n"
-                                         "Если картинки не нравятся, нейросеть может нарисовать их заново.",
-                              parse_mode=ParseMode.HTML, reply_markup=kb([[("🔁 Нарисовать заново", "regen")]]))
+                                         "Если что-то не нравится, напишите нейросети, что исправить, "
+                                         "или нарисуйте тему заново.",
+                              parse_mode=ParseMode.HTML,
+                              reply_markup=kb([[("✏️ Исправить картинки", "fix")], [("🔁 Нарисовать заново", "regen")]]))
     await chat.send_message(f"Тема: {theme_label(d)}\n\nКакие головоломки положить в книгу?",
                             reply_markup=kinds_keyboard(d))
 
