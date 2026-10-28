@@ -21,8 +21,17 @@ class AIError(RuntimeError):
     """Something the author should read (in Russian)."""
 
 
-class LimitReached(AIError):
+class Fatal(AIError):
+    """No point in asking again: no keys, wrong keys, no internet."""
+
+
+class LimitReached(Fatal):
     pass
+
+
+class Refused(AIError):
+    """The picture model's safety filter turned the prompt down. It often fires on harmless prompts
+    ("hamburger" alone has been refused), so rewording the prompt usually helps."""
 
 
 def _keys():
@@ -40,13 +49,13 @@ def configured():
 def _run(model, payload, timeout=120):
     keys = _keys()
     if not keys:
-        raise AIError("Нейросеть не подключена: в файле .env нет CF_ACCOUNT_ID и CF_API_TOKEN.")
+        raise Fatal("Нейросеть не подключена: в файле .env нет CF_ACCOUNT_ID и CF_API_TOKEN.")
     acc, tok = keys
     url = f"https://api.cloudflare.com/client/v4/accounts/{acc}/ai/run/{model}"
     try:
         r = httpx.post(url, headers={"Authorization": f"Bearer {tok}"}, json=payload, timeout=timeout)
     except httpx.HTTPError as e:
-        raise AIError(f"Нет связи с Cloudflare ({type(e).__name__}). Проверьте интернет и попробуйте ещё раз.")
+        raise Fatal(f"Нет связи с Cloudflare ({type(e).__name__}). Проверьте интернет и попробуйте ещё раз.")
     try:
         data = r.json()
     except ValueError:
@@ -57,8 +66,10 @@ def _run(model, payload, timeout=120):
         raise LimitReached("Бесплатный дневной лимит нейросети Cloudflare закончился. "
                            "Он обновится в 00:00 по UTC (03:00 по Москве).")
     if r.status_code in (401, 403) or any(e.get("code") in (10000, 9109) for e in errors):
-        raise AIError("Cloudflare не принял ключ. Проверьте CF_ACCOUNT_ID и CF_API_TOKEN в .env "
+        raise Fatal("Cloudflare не принял ключ. Проверьте CF_ACCOUNT_ID и CF_API_TOKEN в .env "
                       "(токен из шаблона «Workers AI»).")
+    if "nsfw" in text or any(e.get("code") == 3030 for e in errors):
+        raise Refused("Фильтр Cloudflare не пропустил описание картинки.")
     if r.status_code >= 400 or not data.get("success", False):
         raise AIError(f"Cloudflare вернул ошибку {r.status_code}: {text[:200] or r.text[:200]}")
     return data["result"]
@@ -81,9 +92,11 @@ def chat_json(system, user, max_tokens=2500):
                "max_tokens": max_tokens, "temperature": 0.7, "response_format": {"type": "json_object"}}
     try:
         result = _run(TEXT_MODEL, payload)
-    except AIError as e:
-        if isinstance(e, LimitReached) or "ключ" in str(e) or "связи" in str(e):
-            raise
+    except Fatal:
+        raise
+    except Refused:
+        raise AIError("Нейросеть отказалась придумывать эту тему. Попробуйте написать её иначе.")
+    except AIError:
         payload.pop("response_format")                  # JSON mode refused: ask for plain text with JSON inside
         result = _run(TEXT_MODEL, payload)
     return _json_from(result.get("response", result))
@@ -92,9 +105,9 @@ def chat_json(system, user, max_tokens=2500):
 def picture(prompt, seed, steps=6):
     try:
         result = _run(IMAGE_MODEL, {"prompt": prompt, "steps": steps, "seed": seed}, timeout=180)
-    except AIError as e:
-        if isinstance(e, LimitReached) or "ключ" in str(e) or "связи" in str(e):
-            raise
+    except (Fatal, Refused):
+        raise
+    except AIError:
         result = _run(IMAGE_MODEL, {"prompt": prompt, "steps": steps}, timeout=180)
     try:
         return Image.open(io.BytesIO(base64.b64decode(result["image"]))).convert("RGB")

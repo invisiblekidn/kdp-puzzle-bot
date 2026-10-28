@@ -6,6 +6,7 @@ and registers the pictures as icons, maze shapes and dot-to-dot figures, so the 
 them like the built-in ones. "Another variant" of the same book reuses the folder: no new neurons spent.
 """
 import json
+import logging
 import os
 import random
 import re
@@ -20,6 +21,8 @@ from .icons import RASTER
 from .lib import font
 from .puzzles.maze import THIN_SHAPES
 from .shapes import SHAPE_NAMES, SHAPES
+
+log = logging.getLogger(__name__)
 
 PICTURES = 12
 MIN_PICTURES = 8
@@ -59,9 +62,12 @@ Return a JSON object with exactly these fields:
 "gift": a phrase that completes "Makes ___." (e.g. "a great gift for little dinosaur fans").
 """
 
-STYLE = ("Simple cute cartoon coloring book icon for kids, black and white line art, thick clean black outlines, "
+STYLE = ("Simple cute cartoon coloring book icon, black and white line art, thick clean black outlines, "
          "pure white background, no shading, no gray, no color, no text, one single object, centered, "
          "fully visible with empty space around it")
+# Cloudflare's safety filter sometimes refuses a harmless prompt; then the picture is asked for in other words.
+PLAIN = ("Black and white line art with thick clean outlines on a plain white background, "
+         "one single object in the middle, no text")
 
 
 def slug(text):
@@ -139,11 +145,25 @@ def build(typed, themes_dir, progress=lambda text: None, seed=None):
 
     def draw(i):
         p = pics[i]
-        for attempt in range(3):
-            img = ai.picture(f"{p['prompt']}. {STYLE}", seed + i * 101 + attempt * 7919)
+        thing = " ".join(str(p.get("name") or name).split())[:40]
+        prompts = [f"{p['prompt']}. {STYLE}",
+                   f"A friendly cartoon {thing} from a {name} coloring book. {PLAIN}",
+                   f"A simple outline drawing of a {thing}. {PLAIN}"]
+        variant = 0
+        for attempt in range(4):
             try:
+                img = ai.picture(prompts[variant], seed + i * 101 + attempt * 7919)
                 icon, sil = raster.clean(img)
-            except raster.BadArt:
+            except ai.Fatal:
+                raise
+            except ai.Refused:
+                log.warning("picture %d refused by the filter: %s", i + 1, prompts[variant])
+                variant += 1
+                if variant == len(prompts):
+                    return None
+                continue
+            except (ai.AIError, raster.BadArt) as e:
+                log.warning("picture %d attempt %d: %s", i + 1, attempt + 1, e or type(e).__name__)
                 continue
             img.save(os.path.join(tmp, f"raw_{i + 1:02d}.jpg"), quality=85)
             icon.save(os.path.join(tmp, f"pic_{i + 1:02d}.png"))
@@ -154,8 +174,12 @@ def build(typed, themes_dir, progress=lambda text: None, seed=None):
         return None
 
     progress(f"🎨 Рисую картинки: 0 из {len(pics)}")
-    with ThreadPoolExecutor(4) as pool:
-        good = [i for i in pool.map(draw, range(len(pics))) if i is not None]
+    try:
+        with ThreadPoolExecutor(4) as pool:
+            good = [i for i in pool.map(draw, range(len(pics))) if i is not None]
+    except ai.AIError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     if len(good) < MIN_PICTURES:
         shutil.rmtree(tmp, ignore_errors=True)
         raise ai.AIError("Не получилось нарисовать достаточно картинок для этой темы. Попробуйте ещё раз "
