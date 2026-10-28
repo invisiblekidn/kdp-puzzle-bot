@@ -270,12 +270,17 @@ def scene(C, n, label):
                 C.stroke([(x + d, top(x) - 6), (x + d * 1.6, top(x) - 14)], 1.0)
     C.stroke([(x, top(x)) for x in xs], 2.0)
     if label:
-        from .lib import font
+        from .lib import font, logo
         cx = (bx0 + bx1) / 2
-        tw = font(sub_font(), 10).getlength(label) / S + 24
+        mark = logo("kmark_black")
+        mw = 13 * mark.width / mark.height                 # the K mark sits before "page N of M", as in MAZES
+        lw = font(sub_font(), 10).getlength(label) / S
+        tw = mw + 5 + lw + 24
         C.poly(rounded(cx - tw / 2, by0 + 6, cx + tw / 2, by0 + 26, 10), 255)
         C.stroke(rounded(cx - tw / 2, by0 + 6, cx + tw / 2, by0 + 26, 10), 1.3, closed=True)
-        C.text(cx, by0 + 16, label, sub_font(), 10, "mm")
+        left = cx - tw / 2 + 12
+        C.image(mark, left + mw / 2, by0 + 16, h=13)
+        C.text(left + mw + 5, by0 + 16, label, sub_font(), 10, "lm")
 
 
 # -------------------------------------------------------- background fill

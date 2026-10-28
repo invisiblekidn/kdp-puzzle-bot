@@ -46,3 +46,6 @@ python make_book.py --theme christmas --maze 10 --wordsearch 10 --hidden 6 --dot
   с номером страницы, искорки на свободном месте, крупные контурные заголовки).
 - `fonts/`: Andika, Fredoka, Griffy, Creepster, Audiowide (SIL Open Font License), Luckiest Guy и
   Mountains of Christmas (Apache 2.0). Все можно использовать в коммерческих книгах, лицензии лежат рядом.
+- `assets/logo/`: логотипы Invisible KID. Горизонтальный стоит на титульном листе, на сертификате и на
+  обложке (на белой плашке), компактный на странице «This book belongs to», значок K рядом с номером
+  каждой страницы и внизу корешка. Чтобы заменить логотип, положите PNG с прозрачным фоном под тем же именем.

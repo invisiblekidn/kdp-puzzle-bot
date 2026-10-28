@@ -16,7 +16,9 @@ S = DPI / 72 * SS                   # device pixels per point while drawing
 PW, PH = 612.0, 792.0               # 8.5 x 11 in
 OUT_W, OUT_H = round(PW * DPI / 72), round(PH * DPI / 72)   # 2550 x 3300 px
 
-FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FONT_DIR = os.path.join(ROOT, "fonts")
+LOGO_DIR = os.path.join(ROOT, "assets", "logo")   # Invisible KID logos, transparent PNG
 TITLE_FONT, BOLD, REG = "Fredoka.ttf", "Andika-Bold.ttf", "Andika-Regular.ttf"
 VARIATIONS = {TITLE_FONT: [600, 100]}     # Fredoka is a variable font: weight, width
 _fonts = {}
@@ -30,6 +32,16 @@ def font(name, pt):
             f.set_variation_by_axes(VARIATIONS[name])
         _fonts[key] = f
     return _fonts[key]
+
+
+_logos = {}
+
+
+def logo(name):
+    """A logo from assets/logo as RGBA, e.g. "horizontal_black", "compact_black", "kmark_white"."""
+    if name not in _logos:
+        _logos[name] = Image.open(os.path.join(LOGO_DIR, name + ".png")).convert("RGBA")
+    return _logos[name]
 
 
 def wrap(text, name, pt, max_w):
@@ -198,6 +210,15 @@ class Canvas:
         """outline: width in pt of a border drawn around the letters (cover titles)."""
         self.d.text(self._p(x, y), s, font=font(name, pt), fill=self.ink(gray), anchor=anchor,
                     stroke_width=round(outline * S), stroke_fill=self.ink(outline_gray))
+
+    def image(self, img, x, y, w=None, h=None):
+        """Paste an RGBA image centred on (x, y), scaled to width w or height h in points."""
+        scale = (w / img.width) if w else (h / img.height)
+        size = (round(img.width * scale * S), round(img.height * scale * S))
+        img = img.resize(size, Image.LANCZOS)
+        px, py = self._p(x, y)
+        self.im.paste(img.convert(self.mode), (round(px - size[0] / 2), round(py - size[1] / 2)), img.getchannel("A"))
+        return img.width / S, img.height / S
 
     def final_bytes(self):
         return self.im.resize((round(self.w * DPI / 72), round(self.h * DPI / 72)), Image.LANCZOS)

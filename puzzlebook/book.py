@@ -8,7 +8,7 @@ from functools import partial
 from .icons import draw_icon
 from .layout import BOTTOM, bullets, frame, grid_cells, header, para
 from . import style
-from .lib import OUT_H, OUT_W, PH, PW, REG, TITLE_FONT, Canvas, PdfWriter, rounded, wrap
+from .lib import OUT_H, OUT_W, PH, PW, REG, Canvas, PdfWriter, logo, rounded, wrap
 from .puzzles.dots import Dots
 from .puzzles.hidden import Hidden
 from .puzzles.maze import Maze
@@ -117,7 +117,7 @@ class Book:
         info = f"{total} puzzles for kids {self.spec.ages.lower()}" + (" · answers included" if self.spec.answers else "")
         C.text(cx, 214, info, style.sub_font(), 16, gray=40)
         C.stroke([(cx - 170, 192), (cx + 170, 192)], 1.4, dash=(6, 6))
-        C.text(cx, 142, self.spec.author, TITLE_FONT, 40, "ms", gray=0)
+        C.image(logo("horizontal_black"), cx, 150, w=270)
 
     def copyright_page(self, C, n):
         x0, x1 = frame(n)
@@ -126,6 +126,7 @@ class Book:
         C.stroke([(cx - 170, PH - 250), (cx + 170, PH - 250)], 2.4)
         for i, name in enumerate(self.theme["icons"][:3]):
             draw_icon(C, name, cx + (i - 1) * 120, PH - 330, 54)
+        C.image(logo("compact_black"), cx, 382, h=66)
         y = 300
         for line in (self.title, f"Copyright (c) {self.spec.year} {self.spec.author}. All rights reserved."):
             C.text(cx, y, line, REG, 12, "ms")
@@ -174,9 +175,10 @@ class Book:
             C.text(cx, y, line, REG, 16)
             y -= 24
         C.text(x0 + 60, 168, "Date", REG, 13, "ls")
-        C.stroke([(x0 + 60, 188), (x0 + 190, 188)], 2.0)
-        C.text(x1 - 190, 168, "Signed", REG, 13, "ls")
-        C.stroke([(x1 - 190, 188), (x1 - 60, 188)], 2.0)
+        C.stroke([(x0 + 60, 188), (x0 + 178, 188)], 2.0)
+        C.text(x1 - 178, 168, "Signed", REG, 13, "ls")
+        C.stroke([(x1 - 178, 188), (x1 - 60, 188)], 2.0)
+        C.image(logo("horizontal_black"), cx, 184, w=112)
 
     def answers_page(self, C, n, items):
         x0, x1 = frame(n)

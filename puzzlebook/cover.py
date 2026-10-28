@@ -11,7 +11,7 @@ import random
 from PIL import Image
 
 from .icons import draw_icon
-from .lib import BOLD, DPI, REG, TITLE_FONT, Canvas, S, font, rounded, star_pts, wrap
+from .lib import BOLD, DPI, REG, TITLE_FONT, Canvas, S, font, logo, rounded, star_pts, wrap
 from .puzzles.maze import Maze
 from .themes import theme_word
 
@@ -112,7 +112,7 @@ class Cover:
                  (card[0] + 2, card[1] + 70, 10), (card[2] - 2, card[1] + 66, -10)]
         for i, (x, yy, rot) in enumerate(spots):
             self.sticker(C, icons[i % len(icons)], x, yy, 78, self.col["sticker"][i % len(self.col["sticker"])], rot)
-        # age badge, puzzle count burst, author
+        # age badge, puzzle count burst, logo
         bx, by = x0 + SAFE + 58, self.y0 + SAFE + 60
         C.dot(bx, by, 56, self.col["dark"])
         C.dot(bx, by, 51, self.col["highlight"])
@@ -124,8 +124,16 @@ class Cover:
         C.poly(star_pts(66, 51, 14, sx, sy), self.col["accent"])
         C.text(sx, sy + 8, str(self.total), TITLE_FONT, 40, "mm", gray=WHITE)
         C.text(sx, sy - 24, "PUZZLES", BOLD, 12, "mm", gray=WHITE)
-        C.text(cx, self.y0 + SAFE + 14, self.book.spec.author, BOLD, 24, "ms", gray=WHITE, outline=1.6,
-               outline_gray=self.col["dark"])
+        self.brand(C, cx, self.y0 + SAFE + 30, 180)
+
+    def brand(self, C, cx, cy, width):
+        """The Invisible KID logo on a white label, so it reads on any cover colour."""
+        img = logo("horizontal_black")
+        h = width * img.height / img.width
+        box = (cx - width / 2 - 20, cy - h / 2 - 13, cx + width / 2 + 20, cy + h / 2 + 13)
+        C.poly(rounded(*box, (box[3] - box[1]) / 2), WHITE)
+        C.stroke(rounded(*box, (box[3] - box[1]) / 2), 3.0, closed=True, gray=self.col["dark"])
+        C.image(img, cx, cy, w=width)
 
     def maze(self, C, card):
         shapes = self.theme["maze_shapes"]
@@ -153,7 +161,7 @@ class Cover:
         pt = min(16, (self.spine - 2 * 4.5) * 0.8)     # 0.0625 in from each spine edge
         if pt < 6:                                     # too thin to read: leave the spine plain
             return
-        text = f"{self.book.title}   •   {self.book.spec.author}"
+        text = self.book.title
         f = font(BOLD, pt)
         w, h = round(f.getlength(text)) + 8, round(pt * S * 1.6)
         strip = Image.new("RGBA", (w, h), (0, 0, 0, 0))
@@ -162,6 +170,8 @@ class Cover:
         strip = strip.rotate(-90, expand=True)         # reads top to bottom, as on US books
         cx, cy = (s0 + self.spine / 2) * S, (self.H / 2) * S
         C.im.paste(strip, (round(cx - strip.width / 2), round(cy - strip.height / 2)), strip)
+        mark = logo("kmark_white")                     # publisher mark at the foot of the spine
+        C.image(mark, s0 + self.spine / 2, self.y0 + SAFE + 10, w=min(28, self.spine - 2 * 4.5))
 
     def back_panel(self, C, thumbs):
         x0, x1 = self.back
@@ -216,8 +226,7 @@ class Cover:
             C.stroke([(ax, ty1), (ax + tw, ty1), (ax + tw, ty1 - th), (ax, ty1 - th)], 2.0, closed=True,
                      gray=self.col["dark"])
         # brand and the clear barcode area
-        C.text(x0 + SAFE, self.y0 + SAFE + 10, self.book.spec.author, BOLD, 20, "ls", gray=WHITE, outline=1.4,
-               outline_gray=self.col["dark"])
+        self.brand(C, x0 + SAFE + 20 + 70, self.y0 + SAFE + 24, 140)
         bx1, by0 = x1 - BARCODE_GAP, self.y0 + BARCODE_GAP
         C.rect(bx1 - BARCODE_W, by0, bx1, by0 + BARCODE_H, WHITE)
         self.barcode = (bx1 - BARCODE_W, by0, bx1, by0 + BARCODE_H)
