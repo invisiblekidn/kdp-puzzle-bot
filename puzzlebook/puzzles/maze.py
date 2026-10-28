@@ -6,12 +6,28 @@ Geometry is built in abstract units first, then optionally warped and fitted ont
 import math
 
 from ..icons import draw_icon
-from ..layout import BOTTOM, footer_level, frame, header
-from ..lib import BOLD
-from ..shapes import SHAPES
+from ..layout import BOTTOM, frame, header, level_name
+from ..lib import S, font
+from ..shapes import SHAPE_NAMES, SHAPES
+from ..style import title_font
 
 SQ3 = math.sqrt(3)
 THIN_SHAPES = {"star", "tree", "moon", "rocket", "gift", "ghost"}
+FLOOR = 238                     # gray of the maze floor
+
+
+def label_and_icon(C, x, y, label, icon, side, x0, x1):
+    """Label on one side of the arrow at x and the story picture on the other; swapped near the page edge."""
+    w = font(title_font(), 15).getlength(label) / S + 12
+    if (side < 0 and x - w < x0) or (side > 0 and x + w > x1):
+        side = -side
+    C.text(x + side * 9, y, label, title_font(), 15, "ls" if side > 0 else "rs")
+    draw_icon(C, icon, x - side * 30, y + 2, 38)
+
+
+def arrow_down(C, x, y_from, y_to):
+    C.stroke([(x, y_from), (x, y_to + 6)], 2.6)
+    C.arrow(x, y_to, -90, 9)
 
 
 # ------------------------------------------------------------------ grids
@@ -71,7 +87,7 @@ def masked_graph(polys, inside):
             walls.append((index[mine[0][0]], index[mine[1][0]], mine[0][1]))
         elif len(mine) == 1:
             walls.append((index[mine[0][0]], None, mine[0][1]))
-    return [centres[i] for i in sorted(best)], walls
+    return [centres[i] for i in sorted(best)], walls, [polys[i] for i in sorted(best)]
 
 
 def arc(r, a0, a1, step=0.12):
@@ -262,6 +278,7 @@ class Maze:
         if self.grid == "round":
             rings = max(3, round(math.sqrt(target / 3.2)))
             centres, walls = polar_graph(rings)
+            cells = [arc(rings + 1, 0, 2 * math.pi)[:-1]]
             cell = 1.0
             self.finish_inside = True
         else:
@@ -272,7 +289,7 @@ class Maze:
                 polys, cell = hex_cells(round(n * 0.93))
             else:
                 polys, cell = square_cells(n)
-            centres, walls = masked_graph(polys, inside)
+            centres, walls, cells = masked_graph(polys, inside)
             self.finish_inside = False
         opened, tree = carve(len(centres), walls, rnd)
         outer = [w for w, (a, b, _) in enumerate(walls) if b is None]
@@ -296,6 +313,7 @@ class Maze:
         if self.style == "rounded":
             lines = [chaikin(c, 3) for c in chains(lines)]
         self.walls = [[warp(*p) for p in densify(line, step)] for line in lines]
+        self.cells = [[warp(*p) for p in densify(P + P[:1], step)] for P in cells]
         # solution: cell centres joined through the middles of the opened walls
         route = path_between(tree, start, finish)
         pts = [mid(walls[w_in][2])]
@@ -324,6 +342,8 @@ class Maze:
 
     def _draw(self, C, T, k, lw, answer=False):
         cpt = self.cell * k
+        for P in self.cells:                             # pale floor inside the maze, as in the MAZES book
+            C.poly([T(p) for p in P], FLOOR, seam=True)
         if self.outlined and not answer:
             outer = max(lw * 3.2, cpt * 0.34)
             for line in self.walls:
@@ -338,25 +358,25 @@ class Maze:
 
     def page(self, C, n):
         x0, x1 = frame(n)
-        top = header(C, n, f"Maze {self.number}", self.line)
-        area_top = top - 70
-        area_bot = BOTTOM + (14 if self.finish_inside else 70)
+        shape = SHAPE_NAMES.get(self.shape, self.shape) if self.grid != "round" else "Round maze"
+        top = header(C, n, f"MAZE #{self.number}", f"{shape} · {level_name(self.level)} level · {self.line}")
+        area_top = top - 62
+        area_bot = BOTTOM + (8 if self.finish_inside else 62)
         k, T = self._fit(x0 + 6, area_bot, x1 - 6, area_top)
         lw = max(2.0, min(4.6, self.cell * k * 0.09))
         self._draw(C, T, k, lw)
-        # labels sit just outside the maze's own top / bottom edge (the opening is within ~half a cell of it)
+        # START above the entrance and FINISH below the exit, each with an arrow and the story picture
         top_y = T((0, self.bbox[3]))[1]
         bot_y = T((0, self.bbox[1]))[1]
         ex, _ = T(self.entry)
-        C.text(ex, top_y + 11, "START", BOLD, 11)
-        draw_icon(C, self.a, ex, top_y + 44, 42)
+        arrow_down(C, ex, top_y + 34, top_y + 6)
+        label_and_icon(C, ex, top_y + 24, "START", self.a, -1, x0, x1)
         fx, fy = T(self.exit)
         if self.finish_inside:
             draw_icon(C, self.b, fx, fy, min(40, self.cell * k * 0.9))
         else:
-            C.text(fx, bot_y - 20, "FINISH", BOLD, 11)
-            draw_icon(C, self.b, fx, bot_y - 48, 42)
-        footer_level(C, n, self.level)
+            arrow_down(C, fx, bot_y - 6, bot_y - 34)
+            label_and_icon(C, fx, bot_y - 26, "FINISH", self.b, 1, x0, x1)
 
     def answer(self, C, x0, y0, x1, y1):
         k, T = self._fit(x0, y0, x1, y1)

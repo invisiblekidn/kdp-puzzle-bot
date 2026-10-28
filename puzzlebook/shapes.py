@@ -57,3 +57,8 @@ SHAPES = {
     "apple": union(circles((-0.36, -0.12, 0.66), (0.36, -0.12, 0.66)), box(-0.08, 0.45, 0.1, 0.9)),
     "cloud": circles((-0.55, -0.15, 0.45), (0, 0.15, 0.6), (0.55, -0.15, 0.45), (0, -0.3, 0.45)),
 }
+
+SHAPE_NAMES = {"square": "Square maze", "circle": "Round maze", "heart": "Big heart", "star": "Shining star",
+               "diamond": "Diamond", "tree": "Christmas tree", "snowman": "Snowman", "gift": "Gift box",
+               "pumpkin": "Jack-o'-lantern", "ghost": "Little ghost", "moon": "Crescent moon", "rocket": "Rocket",
+               "fish": "Fish", "apple": "Apple", "cloud": "Fluffy cloud"}

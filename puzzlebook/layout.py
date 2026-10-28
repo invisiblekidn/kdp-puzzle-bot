@@ -1,10 +1,10 @@
 """Page-level layout helpers shared by all puzzle types."""
 from .icons import draw_icon
-from .lib import BOLD, PH, PW, REG, TITLE_FONT, wrap
+from .lib import PW, REG, wrap
+from . import style
 
 INNER, OUTER = 54.0, 40.0       # gutter side / outer side margins (pt); KDP minimum is 27 / 18
-TOP = 40.0                      # highest content stays this far below the top edge
-BOTTOM = 66.0                   # lowest y used by page content (page number sits below it)
+BOTTOM = style.CONTENT_BOTTOM   # lowest y used by page content (the bottom landscape sits below it)
 
 
 def frame(n):
@@ -15,16 +15,9 @@ def frame(n):
 
 
 def header(C, n, title, sub=None):
-    """Big page title plus an optional wrapped instruction line. Returns the y below it."""
+    """Big page title plus an optional wrapped line under it. Returns the y below it."""
     x0, x1 = frame(n)
-    cx = (x0 + x1) / 2
-    C.text(cx, PH - 80, title, TITLE_FONT, 36)
-    y = PH - 80 - 12
-    if sub:
-        for line in wrap(sub, REG, 16, x1 - x0):
-            y -= 24
-            C.text(cx, y, line, REG, 16)
-    return y - 24
+    return style.header(C, n, x0, x1, title, sub)
 
 
 def para(C, x, y, text, name=REG, pt=13, width=400, leading=1.35, anchor="ls"):
@@ -47,9 +40,4 @@ def grid_cells(x0, x1, top, bottom, cols, rows):
 
 
 def level_name(level):
-    return "Easy" if level < 0.34 else ("Medium" if level < 0.67 else "Tricky")
-
-
-def footer_level(C, n, level):
-    x0, x1 = frame(n)
-    C.text(x0, 30, f"Level: {level_name(level)}", BOLD, 11, "ls")
+    return "easy" if level < 0.34 else ("medium" if level < 0.67 else "tricky")

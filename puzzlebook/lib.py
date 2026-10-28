@@ -110,10 +110,19 @@ def heart_pts(width, n=120, cx=0.0, cy=0.0):
     return pts
 
 
+def rounded(x0, y0, x1, y1, r, n=10):
+    """Rounded rectangle outline points."""
+    pts = []
+    for (x, y, a0) in ((x1 - r, y1 - r, 0), (x0 + r, y1 - r, 90), (x0 + r, y0 + r, 180), (x1 - r, y0 + r, 270)):
+        pts += [(x + r * math.cos(math.radians(a0 + 90 * i / n)), y + r * math.sin(math.radians(a0 + 90 * i / n)))
+                for i in range(n + 1)]
+    return pts
+
+
 # ------------------------------------------------------------------ canvas
 class Canvas:
-    """Page canvas (w x h points). mode "RGB" is for the colour cover; gray values then map to gray RGB
-    unless listed in self.colors (the cover uses that to colour icons that are drawn with white fill)."""
+    """Page canvas (w x h points). mode "RGB" is for the colour cover; gray values then map to gray RGB.
+    self.colors remaps gray values while drawing (cover: coloured icon fills; pages: faint background icons)."""
 
     def __init__(self, w=PW, h=PH, mode="L", bg=255):
         self.w, self.h, self.mode = w, h, mode
@@ -122,15 +131,18 @@ class Canvas:
         self.d = ImageDraw.Draw(self.im)
 
     def ink(self, v):
-        if self.mode == "L" or not isinstance(v, int):
+        if not isinstance(v, int):
             return v
-        return self.colors.get(v, (v, v, v))
+        v = self.colors.get(v, v)
+        return v if self.mode == "L" or not isinstance(v, int) else (v, v, v)
 
     def _p(self, x, y):
         return (x * S, (self.h - y) * S)
 
-    def poly(self, pts, fill=255):
-        self.d.polygon([self._p(*p) for p in pts], fill=self.ink(fill))
+    def poly(self, pts, fill=255, seam=False):
+        """seam=True also paints the edge, so polygons that share edges leave no hairline gaps."""
+        ink = self.ink(fill)
+        self.d.polygon([self._p(*p) for p in pts], fill=ink, outline=ink if seam else None, width=3 if seam else 1)
 
     def rect(self, x0, y0, x1, y1, fill=0):
         a, b = self._p(min(x0, x1), max(y0, y1)), self._p(max(x0, x1), min(y0, y1))

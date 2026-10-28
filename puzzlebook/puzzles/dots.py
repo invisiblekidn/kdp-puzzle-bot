@@ -2,7 +2,7 @@
 import math
 
 from ..figures import FIGURES
-from ..layout import BOTTOM, footer_level, frame, header
+from ..layout import BOTTOM, frame, header, level_name
 from ..lib import BOLD, REG, S, font
 
 DOT_R = 2.3                 # dot radius (pt)
@@ -164,7 +164,7 @@ class Dots:
         order = ctx["order"]
         self.name = order[(number - 1) % len(order)]
         fig = FIGURES[self.name]
-        self.count = 25 + round(50 * level)
+        self.count = 20 + round(25 * level)             # 20 .. 45 dots
         self.outline, self.details = fig["outline"], fig["details"]
 
     def _geometry(self, x0, y0, x1, y1):
@@ -187,8 +187,8 @@ class Dots:
 
     def page(self, C, n):
         x0, x1 = frame(n)
-        top = header(C, n, f"Dot to Dot {self.number}",
-                     f"Join the dots from 1 to {self.count}, then join {self.count} back to 1. Color your picture!")
+        top = header(C, n, f"DOT TO DOT #{self.number}", f"{level_name(self.level)} level · join the dots from 1 "
+                     f"to {self.count}, then {self.count} back to 1 · color your picture")
         dots, dense, paths = self._geometry(x0 + 30, BOTTOM + 20, x1 - 30, top - 20)
         self._details(C, paths, 2.2)
         labels = label_positions(dots, dense, [p for _, pts, _ in paths for p in pts[::2]])
@@ -196,7 +196,6 @@ class Dots:
             C.dot(x, y, DOT_R)
             C.text(lx, ly, str(i + 1), BOLD, NUM_PT, "mm")
         C.ring(dots[0][0], dots[0][1], DOT_R + 3.2, 1.2)
-        footer_level(C, n, self.level)
 
     def answer(self, C, x0, y0, x1, y1):
         dots, dense, paths = self._geometry(x0 + 10, y0 + 22, x1 - 10, y1 - 4)

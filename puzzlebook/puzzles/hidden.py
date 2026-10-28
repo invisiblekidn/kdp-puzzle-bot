@@ -2,8 +2,8 @@
 import math
 
 from ..icons import draw_icon
-from ..layout import BOTTOM, footer_level, frame, header
-from ..lib import BOLD, REG
+from ..layout import BOTTOM, frame, header, level_name
+from ..lib import BOLD, REG, rounded
 
 ASPECT = 1.12          # scene height / width
 
@@ -47,7 +47,7 @@ class Hidden:
     def _scene(self, C, x0, top, w, answer=False):
         h = w * ASPECT
         if not answer:
-            C.stroke([(x0, top), (x0 + w, top), (x0 + w, top - h), (x0, top - h)], 2.2, closed=True)
+            C.stroke(rounded(x0, top - h, x0 + w, top, 14), 2.4, closed=True)
         wanted = {name for name, _ in self.targets}
         for name, x, y, d, rot in self.items:
             cx, cy = x0 + x * w, top - y * w
@@ -58,21 +58,20 @@ class Hidden:
 
     def page(self, C, n):
         x0, x1 = frame(n)
-        top = header(C, n, f"Seek and Find {self.number}", "Find every picture from the list below. "
-                     "Count them and write the number in the box!")
+        top = header(C, n, f"SEEK AND FIND #{self.number}", f"{level_name(self.level)} level · find every picture "
+                     "from the list, count them and write the number in the box")
         legend_h = 96
         w = min(x1 - x0 - 8, (top - 10 - BOTTOM - legend_h) / ASPECT)
         sx = (x0 + x1) / 2 - w / 2
         h = self._scene(C, sx, top - 6, w)
         y = top - 6 - h - 52
         k = len(self.targets)
-        slot = (x1 - x0) / k
+        slot = w / k                                     # the legend spans exactly the picture's width
         for i, (name, _) in enumerate(self.targets):
-            cx = x0 + slot * (i + 0.5)
+            cx = sx + slot * (i + 0.5) + 10
             draw_icon(C, name, cx - 34, y, 46)
             C.text(cx + 2, y, "=", BOLD, 22, "mm")
-            C.stroke([(cx + 18, y - 20), (cx + 58, y - 20), (cx + 58, y + 20), (cx + 18, y + 20)], 2.0, closed=True)
-        footer_level(C, n, self.level)
+            C.shape(rounded(cx + 18, y - 20, cx + 58, y + 20, 7), 2.0)
 
     def answer(self, C, x0, y0, x1, y1):
         w = min(x1 - x0, (y1 - y0 - 20) / ASPECT)

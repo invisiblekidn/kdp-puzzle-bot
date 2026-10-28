@@ -10,7 +10,7 @@ Telegram-бот (@kid_01_bot) работает на вашем компьюте�
 - Лабиринты: квадратная, шестиугольная (соты) или круглая сетка; форма фигуры из темы (сердце, звезда,
   ёлка, тыква, ракета...); стены прямые, скруглённые, волнистые или двойные. Каждый следующий лабиринт
   в книге выглядит иначе (`puzzlebook/puzzles/maze.py`, формы в `puzzlebook/shapes.py`).
-- Dot-to-dot: 25–75 точек, 20 картинок с прорисованными глазами, ртом, пятнами
+- Dot-to-dot: 20–45 точек, 20 картинок с прорисованными глазами, ртом, пятнами
   (`puzzlebook/figures.py`, туда же добавляются новые картинки).
 - Сложность: `progressive` (от лёгких к сложным, по умолчанию), `easy`, `medium`, `hard`.
 - Темы: `christmas`, `halloween`, `space`, `animals` (файл `puzzlebook/themes.py`).
@@ -42,4 +42,7 @@ python make_book.py --theme christmas --maze 10 --wordsearch 10 --hidden 6 --dot
 - `puzzlebook/icons.py`: контурные иконки, которые ребёнок может раскрасить.
 - `puzzlebook/puzzles/`: по файлу на каждый тип головоломки (страница + ответ).
 - `puzzlebook/book.py`: сборка всей книги.
-- `fonts/`: шрифты Andika и Fredoka (SIL Open Font License, можно использовать в коммерческих книгах).
+- `puzzlebook/style.py`: оформление страниц в стиле книги MAZES (рамка, тематические уголки, пейзаж внизу
+  с номером страницы, искорки на свободном месте, крупные контурные заголовки).
+- `fonts/`: Andika, Fredoka, Griffy, Creepster, Audiowide (SIL Open Font License), Luckiest Guy и
+  Mountains of Christmas (Apache 2.0). Все можно использовать в коммерческих книгах, лицензии лежат рядом.

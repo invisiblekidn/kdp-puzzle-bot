@@ -7,7 +7,8 @@ from functools import partial
 
 from .icons import draw_icon
 from .layout import BOTTOM, bullets, frame, grid_cells, header, para
-from .lib import BOLD, OUT_H, OUT_W, PH, PW, REG, TITLE_FONT, Canvas, PdfWriter, wrap
+from . import style
+from .lib import OUT_H, OUT_W, PH, PW, REG, TITLE_FONT, Canvas, PdfWriter, rounded, wrap
 from .puzzles.dots import Dots
 from .puzzles.hidden import Hidden
 from .puzzles.maze import Maze
@@ -50,6 +51,8 @@ class Book:
     def __init__(self, spec):
         self.spec = spec
         self.theme = get_theme(spec.theme)
+        self.theme_key = (spec.theme or "animals").strip().lower()
+        style.set_theme(self.theme_key)
         if spec.difficulty not in LEVELS and spec.difficulty != "progressive":
             raise ValueError(f"Unknown difficulty '{spec.difficulty}'")
         self.kinds = [k for k in ORDER if spec.counts.get(k, 0) > 0]
@@ -96,45 +99,49 @@ class Book:
     # ---------------------------------------------------------------- pages
     def title_page(self, C, n):
         cx = PW / 2
-        y = PH - 190
-        for line in wrap(self.title, TITLE_FONT, 56, 480):
-            C.text(cx, y, line, TITLE_FONT, 56)
+        C.text(cx, PH - 196, style.TAGLINES[style.theme_key()], style.sub_font(), 20, gray=40)
+        y = PH - 262
+        lines = wrap(self.title, style.title_font(), 62, 440)
+        for line in lines:
+            style.display_text(C, cx, y, line, style.fit_size(line, style.title_font(), 62, 470))
             y -= 66
-        y -= 10
-        for line in wrap(self.subtitle, REG, 22, 480):
-            C.text(cx, y, line, REG, 22)
-            y -= 30
-        row = self.theme["icons"][:5]
-        for i, name in enumerate(row):
-            draw_icon(C, name, cx + (i - 2) * 98, 330, 76)
-        C.ring(cx, 190, 58, 3.4)
-        C.ring(cx, 190, 51, 1.4)
-        C.text(cx, 202, self.spec.ages.split()[0], BOLD, 18, "mm")
-        C.text(cx, 176, self.spec.ages.split()[-1], BOLD, 28, "mm")
-        C.text(cx, 74, self.spec.author, BOLD, 20)
+        icon_top, icon_bottom = y + 20, 290                 # between the title and the level pills
+        size = min(150, icon_top - icon_bottom - 20)
+        draw_icon(C, style.HEROES[style.theme_key()], cx, (icon_top + icon_bottom) / 2, size)
+        pills = ["EASY", "MEDIUM", "TRICKY"]
+        for i, label in enumerate(pills):
+            px = cx + (i - 1) * 118
+            C.shape(rounded(px - 50, 244, px + 50, 274, 15), 2.2)
+            C.text(px, 259, label, style.title_font(), 15, "mm")
+        total = sum(len(v) for v in self.puzzles.values())
+        info = f"{total} puzzles for kids {self.spec.ages.lower()}" + (" · answers included" if self.spec.answers else "")
+        C.text(cx, 214, info, style.sub_font(), 16, gray=40)
+        C.stroke([(cx - 170, 192), (cx + 170, 192)], 1.4, dash=(6, 6))
+        C.text(cx, 142, self.spec.author, TITLE_FONT, 40, "ms", gray=0)
 
     def copyright_page(self, C, n):
         x0, x1 = frame(n)
         cx = (x0 + x1) / 2
-        C.text(cx, PH - 150, "This book belongs to", TITLE_FONT, 28)
-        C.stroke([(cx - 170, PH - 215), (cx + 170, PH - 215)], 2.4)
+        style.display_text(C, cx, PH - 180, "This book belongs to", 36)
+        C.stroke([(cx - 170, PH - 250), (cx + 170, PH - 250)], 2.4)
         for i, name in enumerate(self.theme["icons"][:3]):
-            draw_icon(C, name, cx + (i - 1) * 120, PH - 280, 44)
-        y = 250
+            draw_icon(C, name, cx + (i - 1) * 120, PH - 330, 54)
+        y = 300
         for line in (self.title, f"Copyright (c) {self.spec.year} {self.spec.author}. All rights reserved."):
             C.text(cx, y, line, REG, 12, "ms")
             y -= 18
         y -= 4
-        para(C, x0 + 10, y, "No part of this book may be reproduced, stored in a retrieval system or transmitted in "
+        para(C, x0 + 30, y, "No part of this book may be reproduced, stored in a retrieval system or transmitted in "
              "any form or by any means without the written permission of the author, except for brief quotations "
-             "in reviews. First edition.", REG, 10, x1 - x0 - 20)
+             "in reviews. First edition.", REG, 10, x1 - x0 - 60)
 
     def welcome_page(self, C, n):
         x0, x1 = frame(n)
+        x0, x1 = x0 + 10, x1 - 10
         w = x1 - x0
-        C.text((x0 + x1) / 2, PH - 100, "Welcome, puzzle explorer!", TITLE_FONT, 32)
-        y = para(C, x0, PH - 150, "This book is full of fun puzzles. Grab a pencil and some crayons and "
-                 "let's begin! The puzzles get a little harder as you go.", REG, 14, w)
+        top = header(C, n, "WELCOME!", "hello, puzzle explorer · grab a pencil and some crayons")
+        y = para(C, x0, top - 8, "This book is full of fun puzzles. Let's begin! "
+                 "The puzzles get a little harder as you go.", REG, 14, w)
         how = {"maze": "find the way from START to FINISH.",
                "wordsearch": "find and circle the hidden words.",
                "hidden": "find the pictures, count them and write the number.",
@@ -147,8 +154,8 @@ class Book:
             a, b = self.sections["answers"]
             items.append(f"Answers are at the back of the book (pages {a}-{b}).")
         y = bullets(C, x0, y - 22, items, 13, w)
-        C.text(x0, y - 14, "Tips for grown-ups", BOLD, 18, "ls")
-        bullets(C, x0, y - 44, [
+        C.text(x0, y - 14, "Tips for grown-ups", style.title_font(), 20, "ls")
+        bullets(C, x0, y - 46, [
             "Short sessions work best. Stop when it stops being fun.",
             "Praise the effort, not just the result.",
             "Stuck? Peek at the answers together and try again.",
@@ -157,37 +164,44 @@ class Book:
     def certificate_page(self, C, n):
         x0, x1 = frame(n)
         cx = (x0 + x1) / 2
-        C.stroke([(x0 + 4, 110), (x0 + 4, PH - 90), (x1 - 4, PH - 90), (x1 - 4, 110)], 3.0, dash=(14, 10), closed=True)
-        for (px, py) in ((x0 + 4, 110), (x0 + 4, PH - 90), (x1 - 4, 110), (x1 - 4, PH - 90)):
-            draw_icon(C, "star", px, py, 46)
-        draw_icon(C, "star", cx, PH - 190, 90)
-        C.text(cx, PH - 300, "Great Job!", TITLE_FONT, 54)
-        C.text(cx, PH - 345, "Certificate of Achievement", REG, 20)
-        C.text(cx, PH - 420, "This certificate is awarded to", REG, 16)
-        C.stroke([(cx - 170, PH - 475), (cx + 170, PH - 475)], 2.4)
-        y = PH - 530
-        for line in wrap(f"for finishing the whole book: {self.title}", REG, 16, 450):
+        draw_icon(C, "star", cx, PH - 200, 96)
+        style.display_text(C, cx, PH - 318, "GREAT JOB!", 58)
+        C.text(cx, PH - 362, "Certificate of Achievement", style.sub_font(), 22, gray=40)
+        C.text(cx, PH - 430, "This certificate is awarded to", REG, 16)
+        C.stroke([(cx - 170, PH - 485), (cx + 170, PH - 485)], 2.4)
+        y = PH - 535
+        for line in wrap(f"for finishing the whole book: {self.title}", REG, 16, 420):
             C.text(cx, y, line, REG, 16)
             y -= 24
-        C.text(x0 + 70, 180, "Date", REG, 13, "ls")
-        C.stroke([(x0 + 70, 200), (x0 + 200, 200)], 2.0)
-        C.text(x1 - 200, 180, "Signed", REG, 13, "ls")
-        C.stroke([(x1 - 200, 200), (x1 - 70, 200)], 2.0)
+        C.text(x0 + 60, 168, "Date", REG, 13, "ls")
+        C.stroke([(x0 + 60, 188), (x0 + 190, 188)], 2.0)
+        C.text(x1 - 190, 168, "Signed", REG, 13, "ls")
+        C.stroke([(x1 - 190, 188), (x1 - 60, 188)], 2.0)
 
     def answers_page(self, C, n, items):
         x0, x1 = frame(n)
-        top = header(C, n, "Answers")
+        top = header(C, n, "ANSWERS", "no peeking until you have tried!")
         cells, cw, ch = grid_cells(x0, x1, top, BOTTOM, 2, 2)
         for p, (cx, cy) in zip(items, cells):
-            C.text(cx, cy + ch / 2 - 16, f"{p.answer_title} {p.number}", BOLD, 14)
+            C.text(cx, cy + ch / 2 - 16, f"{p.answer_title} #{p.number}", style.title_font(), 15)
             p.answer(C, cx - cw / 2 + 14, cy - ch / 2 + 10, cx + cw / 2 - 14, cy + ch / 2 - 30)
 
     def doodle_page(self, C, n):
         x0, x1 = frame(n)
-        top = header(C, n, "Doodle Time!", "Draw your favorite picture from this book.")
-        C.stroke([(x0, top - 10), (x1, top - 10), (x1, BOTTOM), (x0, BOTTOM)], 2.4, dash=(12, 9), closed=True)
+        top = header(C, n, "DOODLE TIME!", "draw your favorite picture from this book")
+        C.stroke(rounded(x0 + 4, BOTTOM, x1 - 4, top - 10, 18), 2.4, dash=(12, 9), closed=True)
 
     # -------------------------------------------------------------- output
+    def draw_page(self, n):
+        """Page n (1-based) with its decoration, on a fresh canvas."""
+        style.set_theme(self.theme_key)
+        fn, footer = self.pages[n - 1]
+        C = Canvas()
+        fn(C, n)
+        label = f"page {n} of {len(self.pages)}" if footer else None
+        style.decorate(C, n, label, sparkles=getattr(fn, "__name__", "") != "doodle_page")
+        return C
+
     def render(self, out_dir, preview_pages=(), progress=None):
         """Writes interior.pdf (and PNG previews of preview_pages) into out_dir. Returns their paths."""
         os.makedirs(out_dir, exist_ok=True)
@@ -196,10 +210,7 @@ class Book:
         previews, margins = [], []
         t0 = time.time()
         for n, (fn, footer) in enumerate(self.pages, 1):
-            C = Canvas()
-            fn(C, n)
-            if footer:
-                C.text(PW / 2, 30, str(n), REG, 11, "mm")
+            C = self.draw_page(n)
             img = C.final_bytes()
             box = img.point(lambda v: 255 if v < 250 else 0).getbbox()
             if box:

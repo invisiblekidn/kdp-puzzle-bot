@@ -11,7 +11,7 @@ import random
 from PIL import Image
 
 from .icons import draw_icon
-from .lib import BOLD, DPI, REG, TITLE_FONT, Canvas, S, font, star_pts, wrap
+from .lib import BOLD, DPI, REG, TITLE_FONT, Canvas, S, font, rounded, star_pts, wrap
 from .puzzles.maze import Maze
 from .themes import theme_word
 
@@ -32,14 +32,6 @@ ABOUT = {"maze": "{n} mazes in fun shapes, from easy to tricky",
 def spine_width(pages, paper="white"):
     """Spine width in inches."""
     return pages * PAPER[paper]
-
-
-def rounded(cx0, cy0, cx1, cy1, r, n=10):
-    pts = []
-    for (x, y, a0) in ((cx1 - r, cy1 - r, 0), (cx0 + r, cy1 - r, 90), (cx0 + r, cy0 + r, 180), (cx1 - r, cy0 + r, 270)):
-        pts += [(x + r * math.cos(math.radians(a0 + 90 * i / n)), y + r * math.sin(math.radians(a0 + 90 * i / n)))
-                for i in range(n + 1)]
-    return pts
 
 
 class Cover:
@@ -236,11 +228,7 @@ class Cover:
         """Small images of the first page of up to three puzzle sections."""
         out = []
         for kind in self.book.kinds[:count]:
-            n = self.book.sections[kind][0]
-            fn, _ = self.book.pages[n - 1]
-            C = Canvas()
-            fn(C, n)
-            out.append(C.im)
+            out.append(self.book.draw_page(self.book.sections[kind][0]).im)
         return out
 
     def render(self, out_dir):

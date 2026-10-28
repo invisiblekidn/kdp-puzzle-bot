@@ -1,8 +1,8 @@
 """Word search: theme words hidden in a letter grid, listed under it."""
 import string
 
-from ..layout import BOTTOM, footer_level, frame, header
-from ..lib import BOLD, REG
+from ..layout import BOTTOM, frame, header, level_name
+from ..lib import BOLD, REG, rounded
 
 RIGHT, DOWN, DOWN_RIGHT = (0, 1), (1, 0), (1, 1)
 BACKWARDS = [(0, -1), (-1, 0), (-1, -1), (-1, 1), (1, -1)]
@@ -64,27 +64,36 @@ class WordSearch:
             for c, ch in enumerate(row):
                 C.text(x0 + (c + 0.5) * cell, top - (r + 0.5) * cell, ch, BOLD, pt, "mm")
         side = self.size * cell
-        C.stroke([(x0 - 6, top + 6), (x0 + side + 6, top + 6), (x0 + side + 6, top - side - 6),
-                  (x0 - 6, top - side - 6)], max(1.2, cell * 0.06), closed=True)
+        pad = max(5, cell * 0.25)
+        box = rounded(x0 - pad, top - side - pad, x0 + side + pad, top + pad, max(6, cell * 0.4))
+        if answer:
+            C.stroke(box, max(1.0, cell * 0.05), closed=True)
+        else:
+            C.stroke(box, max(1.4, cell * 0.06), closed=True)
+            box2 = rounded(x0 - pad - 5, top - side - pad - 5, x0 + side + pad + 5, top + pad + 5, max(6, cell * 0.4) + 4)
+            C.stroke(box2, 1.4, dash=(4, 5), closed=True)
 
     def page(self, C, n):
         x0, x1 = frame(n)
-        top = header(C, n, f"Word Search {self.number}", f"Find and circle every word. {self.hint}")
+        top = header(C, n, f"WORD SEARCH #{self.number}",
+                     f"{level_name(self.level)} level · find and circle every word · {self.hint.lower()}")
         cols = 2 if len(self.words) <= 8 else 3
-        list_h = ((len(self.words) + cols - 1) // cols) * 30 + 20
-        avail_h = top - 16 - (BOTTOM + list_h)
-        cell = min((x1 - x0 - 30) / self.size, avail_h / self.size, 44)
+        rows = (len(self.words) + cols - 1) // cols
+        row_h = 28
+        list_h = rows * row_h + 34
+        avail_h = top - 20 - (BOTTOM + list_h)
+        cell = min((x1 - x0 - 40) / self.size, avail_h / self.size, 44)
         side = self.size * cell
         gx = (x0 + x1) / 2 - side / 2
-        self._grid(C, gx, top - 10, cell)
-        y = top - 10 - side - 46
-        colw = (x1 - x0) / cols
+        self._grid(C, gx, top - 14, cell)
+        # the word list lines up with the grid: same left edge, columns share the grid's width
+        colw = side / cols
+        y = top - 14 - side - 48
         for i, w in enumerate(self.words):
-            cx = x0 + colw * (i % cols) + 30
-            cy = y - 30 * (i // cols)
-            C.stroke([(cx, cy - 2), (cx + 14, cy - 2), (cx + 14, cy + 12), (cx, cy + 12)], 1.6, closed=True)
-            C.text(cx + 24, cy, w, REG, 16, "ls")
-        footer_level(C, n, self.level)
+            cx = gx + colw * (i % cols)
+            cy = y - row_h * (i // cols)
+            C.shape([(cx, cy - 2), (cx + 14, cy - 2), (cx + 14, cy + 12), (cx, cy + 12)], 1.6)
+            C.text(cx + 22, cy, w, BOLD, 15, "ls")
 
     def answer(self, C, x0, y0, x1, y1):
         cell = min((x1 - x0) / self.size, (y1 - y0) / self.size) * 0.94
